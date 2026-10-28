@@ -1,0 +1,32 @@
+# ---- 游戏资源不入库（版权 + 体积）----
+work/
+build/
+
+# ---- 行为模块：工具链与编译产物不入库 ----
+# behavior/toolchain/ 是 628 MB 的 MinGW 工具链，
+# 用 behavior/fetch_toolchain.py 自动下载，不要提交。
+behavior/toolchain/
+behavior/out/
+
+# ---- 本地路径配置（含本机绝对路径，不该跟着仓库走）----
+config.json
+launcher.json
+
+# ---- AI 原图默认不入库；想备份 prompt 对应的原图，去掉下面两行 ----
+assets/raw/*
+!assets/raw/.gitkeep
+assets/prepared/*
+!assets/prepared/.gitkeep
+
+# ---- Python ----
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

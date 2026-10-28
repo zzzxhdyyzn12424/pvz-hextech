@@ -1,0 +1,12 @@
+{
+  "mod_name": "沙雕后院",
+  "mod_version": "0.1.0",
+  "base_game": "1.1.0.1056-zh",
+  "unpacked_dir": "work/unpacked",
+  "staging_dir": "build/main_unpack",
+  "output_pak": "build/main.pak",
+  "release_dir": "build/release",
+  "backup_dir": "work/backup",
+  "pack_command": [],
+  "pack_command_help": "PopStudio.ConsoleProject 是交互式的。建议直接用 PopStudio GUI 对 build/main_unpack 执行 Pack；如果你有自己的命令行打包器，把命令写成数组放在 pack_command，例如 [\"packer.exe\", \"pack\", \"{staging}\", \"{output}\"]。"
+}

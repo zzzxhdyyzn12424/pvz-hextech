@@ -1,0 +1,13 @@
+plant_id,part_file,raw_file,scale,offset_x,offset_y,mode,status
+peashooter,PeaShooter_Head.png,tangshi_head_final.png,1.00,0,0,center,todo
+peashooter,PeaShooter_mouth.png,,0,0,0,hide,done
+peashooter,PeaShooter_Lips.png,,0,0,0,hide,done
+peashooter,PeaShooter_blink1.png,,0,0,0,hide,done
+peashooter,PeaShooter_blink2.png,,0,0,0,hide,done
+peashooter,PeaShooter_eyebrow.png,,0,0,0,hide,done
+sunflower,SunFlower_head.png,zhao_yang_head.png,1.00,0,0,center,todo
+wallnut,Wallnut_body.png,jian_qiang_body.png,0.95,0,0,full,todo
+wallnut,Wallnut_cracked1.png,jian_qiang_cracked1.png,0.95,0,0,full,todo
+wallnut,Wallnut_cracked2.png,jian_qiang_cracked2.png,0.95,0,0,full,todo
+potatomine,PotatoMine_body.png,tu_dou_liu_body.png,0.95,0,0,full,todo
+potatomine,PotatoMine_eyes.png,tu_dou_liu_eyes.png,1.00,0,0,center,todo

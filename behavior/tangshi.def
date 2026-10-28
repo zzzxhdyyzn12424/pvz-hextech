@@ -1,0 +1,4 @@
+LIBRARY tangshi
+EXPORTS
+    Tangshi_EnterRage
+    Tangshi_GetMissCount
