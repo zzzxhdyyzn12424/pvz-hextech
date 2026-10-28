@@ -9,7 +9,7 @@
 
 ## 直接玩（不用写代码）
 
-1. 去 [Releases](https://github.com/zzzxhdyyzn12424/pvz-hextech/releases) 下载 `PVZ海克斯版_v1.3.0.zip`
+1. 去 [Releases](https://github.com/zzzxhdyyzn12424/pvz-hextech/releases) 下载 `PVZ海克斯版_v1.6.0.zip`
 2. 解压，**先打开游戏并进入一关**（让场上出现植物和僵尸）
 3. 双击 `PVZ海克斯版.exe`
 
@@ -56,14 +56,14 @@ PVZ海克斯版.exe
 
 | 部分 | 状态 | 位置 |
 |---|---|---|
-| **海克斯版** | ✅ 33 条词条全部实现，102 项测试 | `tools/hextech*.py` |
+| **海克斯版** | ✅ 44 条词条全部实现，133 项测试 | `tools/hextech*.py` |
 | 贴图工具链 | ✅ 可用，AI 出图 → 游戏分部件 PNG | `tools/*_textures.py`、`tools/build_mod.py` |
 | 行为模块（DLL 注入） | ⏸ 已暂停，三条钩子零命中 | `behavior/` |
 
 ### 海克斯版：开发
 
 ```bat
-run.bat tools\test_hextech.py        :: 102 项离线回归，不需要游戏
+run.bat tools\test_hextech.py        :: 133 项离线回归，不需要游戏
 run.bat tools\hextech.py run         :: 启动覆盖层（需要游戏在跑）
 run.bat tools\hextech.py panel       :: 打开词条面板
 run.bat tools\probe_shoot.py test 12 :: 上机验证「真的多射豌豆」
@@ -394,8 +394,8 @@ preview.png
 
 | 文件 | 大小 | 说明 |
 |---|---|---|
-| `PVZ海克斯版_v1.3.0.zip` | ~29 MB | 单文件 exe，玩家双击即用，不需要 Python |
-| `PVZ海克斯版_v1.3.0_源码版.zip` | ~63 KB | 纯 Python 脚本，杀软误报时的兜底方案 |
+| `PVZ海克斯版_v1.6.0.zip` | ~29 MB | 单文件 exe，玩家双击即用，不需要 Python |
+| `PVZ海克斯版_v1.6.0_源码版.zip` | ~63 KB | 纯 Python 脚本，杀软误报时的兜底方案 |
 
 玩家侧流程：
 

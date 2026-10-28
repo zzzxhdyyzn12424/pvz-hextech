@@ -148,6 +148,8 @@ def add_zombie(g, hp, x, y, addr=Z_ADDR, ztype=0, speed=Z_BASE_SPEED):
     g.mem[addr + C.Z_HP] = hp
     g.mem[addr + C.O_X] = x
     g.mem[addr + C.O_Y] = y
+    g.mem[addr + C.O_W] = 50                    # 普通僵尸的碰撞盒（体型缩小用）
+    g.mem[addr + C.O_H] = 110
     g.write_f32(addr + C.O_FX, float(x))       # 原生 float 坐标
     g.write_f32(addr + C.O_FY, float(y))
     g.write_f32(addr + C.Z_SPEED_FIELD, speed)  # 原生移速
@@ -156,7 +158,7 @@ def add_zombie(g, hp, x, y, addr=Z_ADDR, ztype=0, speed=Z_BASE_SPEED):
                           type=ztype, status=0, hp=hp,
                           helmet=0, helmet_max=0,
                           shield_type=0, shield=0, shield_max=0,
-                          x=x, y=y))
+                          x=x, y=y, w=50, h=110))
 
 
 def step(g, eng, n=1, dt=1.0 / 30.0, move=False, anim=None):
@@ -810,6 +812,183 @@ def t_probe_shoot():
     check("间隔 150 -> 120 后开火变多", w120 > w150, True)
 
 
+def t_new_hexes_v16():
+    print("\n[9] v1.6 新增词条（植物 6 + 僵尸 5）")
+
+    def run_speed(z_hexes, z_x=400, ticks=30, warm=30):
+        g, eng = setup(z_x=z_x, z_hexes=z_hexes)
+        step(g, eng, warm, move=True)
+        x0 = g.f32(Z_ADDR + C.O_FX)
+        step(g, eng, ticks, move=True)
+        return x0 - g.f32(Z_ADDR + C.O_FX)
+
+    base_move = run_speed(("z_heavy",))
+
+    # ==================== 植物 ====================
+    # ---- 大腕 ----
+    g, eng = setup(p_hexes=("p_bigpea",))
+    step(g, eng, 3)
+    check("大腕：射击间隔 150 → 600", g.i32(P_ADDR + C.P_SHOOT_INTERVAL), 600)
+
+    g, eng = setup(p_hexes=("p_bigpea",))
+    for _ in range(5):
+        damage_zombie(g, 20)
+        step(g, eng, 2)
+    check("大腕：5 次共 200 伤害", zombie_lost(g, 1000), 200)
+
+    g, eng = setup(z_x=300, p_hexes=("p_bigpea",))
+    x0 = g.i32(Z_ADDR + C.O_X)
+    damage_zombie(g, 20)
+    step(g, eng, 2)
+    check("大腕：命中击退 80px", g.i32(Z_ADDR + C.O_X) - x0, 80)
+
+    # ---- 花晓之剑 ----
+    g, eng = setup(plant_hp=300, p_hexes=("p_bloodsword",))
+    damage_plant(g, 100)
+    step(g, eng, 2)
+    check("花晓之剑：受伤后剩 200", g.i32(P_ADDR + C.P_HP), 200)
+    damage_zombie(g, 100)
+    step(g, eng, 2)
+    check("花晓之剑：命中 100 回血 30", g.i32(P_ADDR + C.P_HP), 230)
+
+    # ---- 泰坦的坚决 ----
+    g, eng = setup(plant_hp=300, p_hexes=("p_titanresolve",))
+    damage_plant(g, 100)
+    step(g, eng, 2)
+    check("泰坦的坚决：第一次不减伤", g.i32(P_ADDR + C.P_HP), 200)
+    check("泰坦的坚决：叠到 1 层",
+          eng.plant_state[P_ADDR].resolve_stacks, 1)
+    damage_plant(g, 100)
+    step(g, eng, 2)
+    check("泰坦的坚决：第二次减伤 5%", g.i32(P_ADDR + C.P_HP), 105)
+    check("泰坦的坚决：叠到 2 层",
+          eng.plant_state[P_ADDR].resolve_stacks, 2)
+
+    # ---- 荆棘之甲 ----
+    g, eng = setup(plant_hp=300, z_x=100, p_hexes=("p_thornmail",))
+    damage_plant(g, 100)
+    step(g, eng, 2)
+    check("荆棘之甲：反弹 50", zombie_lost(g, 1000), 50)
+
+    # ---- 泰坦巨人 ----
+    g, eng = setup(plant_hp=300, p_hexes=("p_titan",))
+    step(g, eng, 3)
+    check("泰坦巨人：上限 300 → 900", g.i32(P_ADDR + C.P_HP_MAX), 900)
+    check("泰坦巨人：当前血补到 900", g.i32(P_ADDR + C.P_HP), 900)
+
+    g, eng = setup()
+    st = eng.plant_state[P_ADDR]
+    st.hexes = ["p_titan"]
+    st.titan_sun_done = False
+    sun0 = g.sun
+    eng._titan_charge({"addr": P_ADDR, "type": 0}, st)
+    check("泰坦巨人：额外扣 100 阳光", sun0 - g.sun, 100)
+    # 同一次种植只扣一次
+    eng._titan_charge({"addr": P_ADDR, "type": 0}, st)
+    check("泰坦巨人：只扣一次", sun0 - g.sun, 100)
+
+    # ---- 巨人杀手 ----
+    g, eng = setup(z_hp=1000, p_hexes=("p_giantkiller",))
+    for _ in range(5):
+        damage_zombie(g, 20)
+        step(g, eng, 2)
+    check("巨人杀手：1000 血 +100%", zombie_lost(g, 1000), 200)
+
+    g, eng = setup(z_hp=200, p_hexes=("p_giantkiller",))
+    for _ in range(5):
+        damage_zombie(g, 20)
+        step(g, eng, 2)
+    check("巨人杀手：200 血 +20%", zombie_lost(g, 200), 120)
+
+    # ==================== 僵尸 ====================
+    # ---- 歌莉娅巨人 ----
+    g, eng = setup(z_hp=1000, z_hexes=("z_goliath",))
+    step(g, eng, 3)
+    check("歌莉娅巨人：血量 1000 → 2000", g.i32(Z_ADDR + C.Z_HP), 2000)
+
+    g, eng = setup(plant_hp=300, z_x=100, z_hexes=("z_goliath",))
+    damage_plant(g, 100)
+    step(g, eng, 2)
+    check("歌莉娅巨人：植物多掉 50", g.i32(P_ADDR + C.P_HP), 150)
+
+    # ---- 科学狂人 ----
+    mad = run_speed(("z_madman",))
+    check("科学狂人：移速 ≈ ×2.5", round(mad / base_move, 1), 2.5)
+
+    g, eng = setup(z_hexes=("z_madman",))
+    step(g, eng, 3)
+    check("科学狂人：宽 50 → 30", g.i32(Z_ADDR + C.O_W), 30)
+    check("科学狂人：高 110 → 66", g.i32(Z_ADDR + C.O_H), 66)
+
+    # ---- 小小杀手 ----
+    sk = run_speed(("z_smallkiller",))
+    check("小小杀手：移速 ≈ ×2", round(sk / base_move, 1), 2.0)
+
+    g, eng = setup(plant_hp=300, z_x=100, z_hexes=("z_smallkiller",))
+    damage_plant(g, 100)
+    step(g, eng, 2)
+    check("小小杀手：植物多掉 50", g.i32(P_ADDR + C.P_HP), 150)
+
+    # ---- 小丑学院 ----
+    g, eng = setup(plant_hp=300, z_x=100, z_hexes=("z_clowncollege",))
+    damage_zombie(g, 1000)
+    step(g, eng, 2)
+    check("小丑学院：植物被炸掉 180", g.i32(P_ADDR + C.P_HP), 120)
+    check("小丑学院：只炸一次",
+          "clown" in eng.zombie_state[Z_ADDR].fired, True)
+
+    # ---- 男爵之手 ----
+    baron = run_speed(("z_baron",))
+    check("男爵之手：自身移速 ≈ ×1.5", round(baron / base_move, 1), 1.5)
+
+    g, eng = setup(plant_hp=300, z_x=100, z_hexes=("z_baron",))
+    damage_plant(g, 100)
+    step(g, eng, 2)
+    check("男爵之手：自身伤害 +50%", g.i32(P_ADDR + C.P_HP), 150)
+
+    # 光环：场上有男爵时，没带这词条的僵尸也加速
+    g, eng = setup(z_x=400, z_hexes=("z_heavy",))
+    step(g, eng, 30, move=True)
+    x0 = g.f32(Z_ADDR + C.O_FX)
+    step(g, eng, 30, move=True)
+    plain = x0 - g.f32(Z_ADDR + C.O_FX)
+
+    g, eng = setup(z_x=400, z_hexes=("z_baron",), two_zombies=True)
+    eng.zombie_state[Z2_ADDR].hexes = ["z_heavy"]     # 第二只没带男爵
+    step(g, eng, 30, move=True)
+    x0 = g.f32(Z2_ADDR + C.O_FX)
+    step(g, eng, 30, move=True)
+    other = x0 - g.f32(Z2_ADDR + C.O_FX)
+    check("男爵之手：光环让别的僵尸 ×1.5", round(other / plain, 1), 1.5)
+
+    # ==================== 规则 ====================
+    bad = 0
+    for seed in range(300):
+        rng = __import__("random").Random(seed)
+        for _ in range(4):
+            hx = C.roll_hexes("zombie", 3, None, rng)
+            if "z_madman" in hx and "z_smallkiller" in hx:
+                bad += 1
+    check("互斥：科学狂人/小小杀手 从未同框", bad, 0)
+
+    want_plant = {"p_bigpea", "p_bloodsword", "p_titanresolve",
+                  "p_thornmail", "p_titan", "p_giantkiller"}
+    seen = set()
+    for seed in range(300):
+        rng = __import__("random").Random(seed)
+        for pt in (0, 3, 5):
+            seen |= set(C.roll_hexes("plant", 3, pt, rng))
+    check("植物新词条都能抽到", len(want_plant & seen), 6)
+
+    want_z = {"z_goliath", "z_madman", "z_clowncollege",
+              "z_smallkiller", "z_baron"}
+    seen = set()
+    for seed in range(300):
+        rng = __import__("random").Random(seed)
+        seen |= set(C.roll_hexes("zombie", 3, None, rng))
+    check("僵尸新词条都能抽到", len(want_z & seen), 5)
+
+
 def main():
     t_rules()
     t_damage_boost()
@@ -820,6 +999,7 @@ def main():
     t_edges()
     t_new_hexes()
     t_probe_shoot()
+    t_new_hexes_v16()
 
     print("\n" + "=" * 52)
     if FAILED:

@@ -172,6 +172,17 @@ ZOMBIE_NAMES = {
     30: "雪人僵尸", 31: "窝瓜僵尸", 32: "海豚骑士僵尸", 33: "小鬼大炮",
 }
 
+# 各植物的阳光成本（原版数值）。【泰坦巨人】按这个表额外再扣一份。
+PLANT_COST = {
+    0: 100, 1: 50, 2: 150, 3: 50, 4: 25, 5: 175, 6: 150, 7: 200, 8: 0,
+    9: 25, 10: 75, 11: 25, 12: 75, 13: 25, 14: 75, 15: 125, 16: 25,
+    17: 50, 18: 325, 19: 25, 20: 125, 21: 100, 22: 175, 23: 125, 24: 0,
+    25: 25, 26: 125, 27: 100, 28: 125, 29: 125, 30: 125, 31: 100,
+    32: 100, 33: 25, 34: 100, 35: 75, 36: 50, 37: 100, 38: 50, 39: 300,
+    40: 250, 41: 150, 42: 150, 43: 225, 44: 200, 45: 50, 46: 125,
+    47: 500, 48: 0,
+}
+
 # ============================================================ 词条定义
 #
 # scope:  plant / zombie
@@ -226,6 +237,26 @@ HEX_DEFS = [
     dict(id="p_collector", name="收集者", short="收", tier=SILVER, scope="plant",
          apply="output", impl=True,
          desc="杀死僵尸后获得 50 阳光。"),
+
+    # ---------------- 植物 v1.6 新增 ----------------
+    dict(id="p_bigpea", name="大腕", short="腕", tier=SILVER, scope="plant",
+         apply="output", impl=True, need="攻速 ×0.25、伤害 ×2、命中击退一格",
+         desc="攻速降低 75%，但射出的豌豆伤害翻倍，并把命中的僵尸击退一格。"),
+    dict(id="p_bloodsword", name="花晓之剑", short="剑", tier=SILVER, scope="plant",
+         apply="output", impl=True,
+         desc="对僵尸造成伤害时，回复自身已损失生命值。"),
+    dict(id="p_titanresolve", name="泰坦的坚决", short="坚", tier=SILVER, scope="plant",
+         apply="tank", impl=True,
+         desc="每次受到伤害，永久增加 5% 免伤（最多 75%）。"),
+    dict(id="p_thornmail", name="荆棘之甲", short="荆", tier=SILVER, scope="plant",
+         apply="tank", impl=True,
+         desc="反弹 50% 所受伤害给正在啃食它的僵尸。"),
+    dict(id="p_titan", name="泰坦巨人", short="泰", tier=SILVER, scope="plant",
+         apply="tank", impl=True, need="种植额外扣阳光 + 血量上限 ×3",
+         desc="种植时额外消耗 100% 的阳光，但血量上限变为 300%。"),
+    dict(id="p_giantkiller", name="巨人杀手", short="巨", tier=SILVER, scope="plant",
+         apply="output", impl=True,
+         desc="基于僵尸最大生命值造成额外伤害：每 10 点血多 1%，最多 +200%。"),
 
     # ---------------- 向日葵专属（v1.0） ----------------
     dict(id="p_devotion", name="全心为你", short="心", tier=SILVER, scope="plant",
@@ -299,6 +330,23 @@ HEX_DEFS = [
     dict(id="z_porcupine", name="豪猪", short="豪", tier=SILVER, scope="zombie",
          impl=True,
          desc="反弹 20% 所受伤害给攻击它的植物。"),
+
+    # ---------------- 僵尸 v1.6 新增 ----------------
+    dict(id="z_goliath", name="歌莉娅巨人", short="歌", tier=SILVER, scope="zombie",
+         impl=True, need="血量 ×2 + 伤害 +50%",
+         desc="血量增加 100%，造成的伤害增加 50%。"),
+    dict(id="z_madman", name="科学狂人", short="科", tier=SILVER, scope="zombie",
+         impl=True, need="碰撞盒缩小 + 移速补位移",
+         desc="体型缩小，移速增加 150%。"),
+    dict(id="z_clowncollege", name="小丑学院", short="丑", tier=SILVER, scope="zombie",
+         impl=True, need="死亡时原位范围爆炸",
+         desc="死亡后在自身所在位置爆炸，对周围植物造成伤害。"),
+    dict(id="z_smallkiller", name="小小杀手", short="小", tier=SILVER, scope="zombie",
+         impl=True, need="碰撞盒缩小 + 移速补位移 + 伤害 +50%",
+         desc="体型缩小，移速增加 100%，造成的伤害增加 50%。"),
+    dict(id="z_baron", name="男爵之手", short="爵", tier=SILVER, scope="zombie",
+         impl=True, need="全场僵尸光环",
+         desc="在场时强化所有僵尸：移速 +50%，伤害 +50%。"),
 ]
 
 # 互斥组：同一只僵尸身上不会同时出现组内两条
@@ -307,8 +355,12 @@ HEX_DEFS = [
 #    三、四条直接飞起来（×3 ×2 ×2 ×1.5 ≈ 18 倍），必须限制成只能吃一条。
 EXCLUSIVE_GROUPS = [
     {"z_mountain", "z_escape"},
-    {"z_escape", "z_lone", "z_homeguard", "z_legday"},
+    # 所有「自身移速加成」互斥：全叠加会让僵尸直接飞过去
+    {"z_escape", "z_lone", "z_homeguard", "z_legday",
+     "z_madman", "z_smallkiller"},
     {"z_scope", "z_scope2"},          # 隔 1 格 / 隔 2 格，后者完全覆盖前者
+    # 两条「体型缩小」都是缩体型 + 加速，叠加没有意义
+    {"z_madman", "z_smallkiller"},
 ]
 
 HEX_BY_ID = {d["id"]: d for d in HEX_DEFS}
@@ -582,7 +634,10 @@ class ObjState:
                  "escape_t", "flash_left", "obs_rate", "prev_x",
                  "pending", "astral", "scope_acc", "rage_hits",
                  "chill_until", "chill_ratio", "chill_prev_x",
-                 "shoot_base")
+                 "shoot_base",
+                 # v1.6
+                 "resolve_stacks", "scale_done", "goliath_done",
+                 "titan_hp_done", "titan_sun_done", "base_w", "base_h")
 
     def __init__(self, hexes, hp):
         self.hexes = hexes
@@ -610,6 +665,14 @@ class ObjState:
         self.chill_ratio = 0.0      # 冰寒：额外减速比例
         self.chill_prev_x = None    # 冰寒：上一帧补减速后的坐标
         self.shoot_base = None      # 植物原生射击间隔（+0x5C 未被改小的值）
+        # ---- v1.6 ----
+        self.resolve_stacks = 0     # 泰坦的坚决：已叠的免伤层数（每层 5%）
+        self.scale_done = False     # 体型缩小是否已应用
+        self.goliath_done = False   # 歌莉娅巨人血量是否已翻倍
+        self.titan_hp_done = False  # 泰坦巨人血量上限是否已 ×3
+        self.titan_sun_done = False # 泰坦巨人额外阳光是否已扣
+        self.base_w = 0             # 原始宽（体型缩放前）
+        self.base_h = 0             # 原始高
 
     def has(self, hid):
         return hid in self.hexes
@@ -709,6 +772,33 @@ class Engine:
     Z_FLASH_CHARGES = 2         # 闪现向前：可触发次数
     Z_FLASH_DIST = 90           # 闪现向前：越过距离（像素）
     Z_PORCUPINE = 0.20          # 豪猪：反弹 20% 所受伤害
+
+    # ---- v1.6 新增植物词条 ----
+    P_BIGPEA_SLOW = 0.75        # 大腕：攻速 -75% → 射击间隔 ×1/(1-0.75) = ×4
+    P_BIGPEA_DMG = 1.00         # 大腕：伤害 +100%（= ×2）
+    P_BIGPEA_KNOCK = 80         # 大腕：命中击退距离（一格 = 80px，往右推）
+    P_BLOODSWORD_RATIO = 0.30   # 花晓之剑：按造成伤害的 30% 回复已损失生命
+    P_TITANRESOLVE_PER_HIT = 0.05   # 泰坦的坚决：每次受伤 +5% 免伤
+    P_TITANRESOLVE_CAP = 0.75       # 泰坦的坚决：免伤上限 75%
+    P_THORNMAIL = 0.50          # 荆棘之甲：反弹 50% 所受伤害
+    P_TITAN_COST = 1.00         # 泰坦巨人：种植额外消耗 100% 阳光
+    P_TITAN_HP = 2.00           # 泰坦巨人：血量上限 +200%（= ×3）
+    P_GIANTKILLER_PER_10HP = 0.01   # 巨人杀手：僵尸每 10 点最大血 → +1%
+    P_GIANTKILLER_CAP = 2.00        # 巨人杀手：增伤上限 +200%
+
+    # ---- v1.6 新增僵尸词条 ----
+    Z_GOLIATH_HP = 1.00         # 歌莉娅巨人：血量 +100%（= ×2）
+    Z_GOLIATH_DMG = 0.50        # 歌莉娅巨人：伤害 +50%
+    Z_MADMAN_SPEED = 1.50       # 科学狂人：移速 +150%
+    Z_MADMAN_SCALE = 0.60       # 科学狂人：碰撞盒缩到 60%
+    Z_CLOWN_RADIUS = 90         # 小丑学院：爆炸半径
+    Z_CLOWN_DMG = 180           # 小丑学院：爆炸伤害（对植物）
+    Z_SMALLKILLER_SPEED = 1.00  # 小小杀手：移速 +100%
+    Z_SMALLKILLER_DMG = 0.50    # 小小杀手：伤害 +50%
+    Z_SMALLKILLER_SCALE = 0.60  # 小小杀手：碰撞盒缩到 60%
+    Z_BARON_SPEED = 0.50        # 男爵之手：全场僵尸移速 +50%
+    Z_BARON_DMG = 0.50          # 男爵之手：全场僵尸伤害 +50%
+
     # 海克斯护盾借用游戏原生护盾槽（Zombie+0xD8/+0xDC/+0xE0）。
     # 1 = 铁门（正面挡豌豆，最像「护盾」）；2 = 梯子；3 = 报纸。
     # 换成别的类型只要改这里，护盾吸收逻辑不用动。
@@ -729,6 +819,7 @@ class Engine:
         self.stats = dict(plant=0, zombie=0, hits=0, kills=0)
         self._aura = {}             # 本帧向日葵光环：addr -> (伤害倍率, 免伤比例)
         self._lonely = {}           # 本帧孤勇者判定：addr -> bool
+        self._baron = False         # 本帧是否有僵尸带「男爵之手」
 
     # ------------------------------------------------ 抽卡
     def _count_for(self, wave=None):
@@ -748,6 +839,9 @@ class Engine:
                 st = ObjState(hexes, o.get("hp_max") or o["hp"])
                 state_map[a] = st
                 self.events.append((kind, a, "spawn", hexes))
+                # 泰坦巨人：抽到的瞬间就收第二份阳光
+                if kind == "plant" and "p_titan" in hexes:
+                    self._titan_charge(o, st)
             o["hexes"] = st.hexes
             o["state"] = st
         # 清理已消失的对象
@@ -793,6 +887,8 @@ class Engine:
 
         self._aura = self._aura_mods(plants)
         self._lonely = {z["addr"]: self._is_lonely(z, zombies) for z in zombies}
+        # 男爵之手：场上只要有一只带这词条的僵尸，全体僵尸一起吃光环
+        self._baron = any(z["state"].has("z_baron") for z in zombies)
         self._tick_plants(plants, zombies, now, dt)
         self._tick_zombies(zombies, plants, now, dt)
 
@@ -830,6 +926,17 @@ class Engine:
             hp = p["hp"]
             mult, dr = self._aura.get(p["addr"], (1.0, 0.0))
 
+            # --- 泰坦巨人：血量上限 ×3（只加一次） ---
+            if st.has("p_titan") and not st.titan_hp_done:
+                st.titan_hp_done = True
+                add = int(st.hp_max * self.P_TITAN_HP)
+                if add > 0:
+                    st.hp_max += add
+                    g.write_i32(p["addr"] + P_HP_MAX, st.hp_max)
+                    self._set_plant_hp(p, hp + add)
+                    hp = p["hp"]
+                    self.events.append(("plant", p["addr"], "泰坦巨人", add))
+
             # --- 攻速：缩短原生射击间隔 +0x5C，让游戏真的多生成子弹 ---
             self._plant_shoot_apply(p, st)
 
@@ -862,6 +969,14 @@ class Engine:
                         refund += dmg * dr
                         self.events.append(("plant", p["addr"], "风语者祝福",
                                             dmg * dr))
+                    # 泰坦的坚决：按「本次受伤前」已有的层数减伤
+                    if st.has("p_titanresolve") and st.resolve_stacks > 0:
+                        tr = min(self.P_TITANRESOLVE_CAP,
+                                 st.resolve_stacks * self.P_TITANRESOLVE_PER_HIT)
+                        part = dmg * tr
+                        refund += part
+                        self.events.append(("plant", p["addr"], "泰坦的坚决",
+                                            part))
                     # 护盾（吃剩下的那部分）
                     if st.shield > 0:
                         absorb = min(st.shield, dmg - refund)
@@ -872,11 +987,24 @@ class Engine:
                 if refund > 0:
                     self._set_plant_hp(p, min(st.hp_max, hp + int(round(refund))))
 
+                # 泰坦的坚决：这次受伤让它更硬（从下一次开始生效）
+                if st.has("p_titanresolve"):
+                    cap = int(round(self.P_TITANRESOLVE_CAP /
+                                    self.P_TITANRESOLVE_PER_HIT))
+                    if st.resolve_stacks < cap:
+                        st.resolve_stacks += 1
+
                 # --- 僵尸侧：谁在啃这株植物 ---
                 src_z = self._attribute_zombie(p, zombies)
                 if src_z is not None:
                     st.last_src = src_z["addr"]
                     self._zombie_attack(src_z, p, dmg, plants, zombies, now)
+                    # 荆棘之甲：把伤害反弹给正在啃它的僵尸
+                    if st.has("p_thornmail") and dmg > 0.5:
+                        back = dmg * self.P_THORNMAIL
+                        self._damage_zombie(src_z, back, source="荆棘之甲")
+                        self.events.append(("zombie", src_z["addr"],
+                                            "荆棘之甲", back))
             st.hp_prev = p["hp"]
 
             # --- 全心为你：周围植物将死，向日葵替它去死 ---
@@ -937,7 +1065,10 @@ class Engine:
         if st.has("p_rageblade"):
             mult += min(st.rage_hits * self.P_RAGEBLADE_PER_HIT,
                         self.P_RAGEBLADE_CAP)
-        if mult <= 1.0 + 1e-6:
+        # 大腕：攻速 -75% → 间隔 ×4（mult 可以小于 1，这里不再提前 return）
+        if st.has("p_bigpea"):
+            mult *= (1.0 - self.P_BIGPEA_SLOW)
+        if abs(mult - 1.0) <= 1e-6:
             return
 
         addr = p["addr"] + P_SHOOT_INTERVAL
@@ -951,6 +1082,23 @@ class Engine:
         cur = self.g.i32(addr)
         if cur != want:
             self.g.write_i32(addr, want)
+
+    def _titan_charge(self, p, st):
+        """泰坦巨人：种植时额外消耗 100% 阳光。
+
+        游戏在种下去的时候已经扣过一份，这里按 PLANT_COST 再扣一份。
+        阳光不够时 add_sun 会夹到 0，不会出现负数。
+        """
+        if st.titan_sun_done:
+            return
+        st.titan_sun_done = True
+        cost = PLANT_COST.get(p.get("type"), 0)
+        if cost <= 0:
+            return
+        extra = int(round(cost * self.P_TITAN_COST))
+        if extra > 0:
+            self.g.add_sun(-extra)
+            self.events.append(("plant", p["addr"], "泰坦巨人阳光", extra))
 
     def _devotion_rescue(self, p, plants):
         """全心为你：找一株相邻、还没用过的向日葵替这株植物去死。"""
@@ -1007,6 +1155,13 @@ class Engine:
             bonus += self.Z_HOMEGUARD_SPEED
         if st.has("z_legday"):
             bonus += self.Z_LEGDAY_SPEED
+        if st.has("z_madman"):
+            bonus += self.Z_MADMAN_SPEED
+        if st.has("z_smallkiller"):
+            bonus += self.Z_SMALLKILLER_SPEED
+        # 男爵之手：光环，对**所有**僵尸生效（包括男爵自己）
+        if self._baron:
+            bonus += self.Z_BARON_SPEED
         if "escape" in st.fired:
             left = max(0.0, 1.0 - (now - st.escape_t) / self.Z_ESCAPE_DECAY)
             bonus += self.Z_ESCAPE_SPEED * left
@@ -1101,6 +1256,34 @@ class Engine:
         else:
             st.prev_x = fx
 
+    def _scale_zombie(self, z, st):
+        """体型缩小：把碰撞盒 O_W / O_H（+0x10 / +0x14）按比例压小。
+
+        ★ 说明（别当成偷懒）：PVZ 僵尸的**绘制**尺寸由 reanim 动画自带，
+        对象里没有一个可直接写的 float 缩放字段 —— 已扫过 .text 里
+        disp 落在 0x100~0x170 的全部 float 写入，只有 0x11C（动画速率）是
+        每帧会动的，其余都是别的用途。所以这里改的是 GameObject 的宽高，
+        影响碰撞 / 命中判定，视觉大小暂时不变。
+
+        每帧维护而不是只写一次：游戏可能在某些状态重算宽高，
+        发现被改回去就再写一遍（读 2 次写 2 次，代价很小）。
+        """
+        scale = (self.Z_SMALLKILLER_SCALE if st.has("z_smallkiller")
+                 else self.Z_MADMAN_SCALE)
+        if st.base_w <= 0:
+            w = self.g.i32(z["addr"] + O_W)
+            h = self.g.i32(z["addr"] + O_H)
+            if w is None or h is None or w <= 0 or h <= 0:
+                return
+            st.base_w, st.base_h = w, h
+            st.scale_done = True
+        tw = max(1, int(st.base_w * scale))
+        th = max(1, int(st.base_h * scale))
+        if self.g.i32(z["addr"] + O_W) != tw:
+            self.g.write_i32(z["addr"] + O_W, tw)
+            self.g.write_i32(z["addr"] + O_H, th)
+            z["w"], z["h"] = tw, th
+
     def _chill_apply(self, z, st, now, dt):
         """冰寒：把这一帧的实际位移再压掉一部分，实现「减速效果提升」。
 
@@ -1162,6 +1345,17 @@ class Engine:
             if lost > 0:
                 tag = tag or "屹立不倒"
                 self._heal_zombie(z, dmg * self.Z_UNYIELDING_LIFESTEAL * lost)
+        # ---- v1.6 ----
+        if st.has("z_goliath"):
+            extra += dmg * self.Z_GOLIATH_DMG
+            tag = "歌莉娅巨人"
+        if st.has("z_smallkiller"):
+            extra += dmg * self.Z_SMALLKILLER_DMG
+            tag = "小小杀手"
+        # 男爵之手：光环，所有僵尸都吃（含男爵自己）
+        if self._baron:
+            extra += dmg * self.Z_BARON_DMG
+            tag = tag or "男爵之手"
         if st.has("z_heavy"):
             extra += st.hp_max * self.Z_HEAVY_RATIO
             tag = "重量级打手"
@@ -1206,6 +1400,22 @@ class Engine:
         for z in zombies:
             st = z["state"]
             hp = z["hp"]
+
+            # --- 体型缩小：科学狂人 / 小小杀手 ---
+            if st.has("z_madman") or st.has("z_smallkiller"):
+                self._scale_zombie(z, st)
+
+            # --- 歌莉娅巨人：血量翻倍（只加一次） ---
+            if st.has("z_goliath") and not st.goliath_done:
+                st.goliath_done = True
+                add = int(st.hp_max * self.Z_GOLIATH_HP)
+                if add > 0:
+                    st.hp_max += add
+                    self.g.write_i32(z["addr"] + Z_HP, hp + add)
+                    z["hp"] = hp + add
+                    hp = z["hp"]
+                    st.hp_prev = hp
+                    self.events.append(("zombie", z["addr"], "歌莉娅巨人", add))
 
             # --- 星界躯体：额外生命值（只加一次） ---
             if st.has("z_astral") and not st.astral:
@@ -1368,6 +1578,10 @@ class Engine:
             if z["hp"] <= 0 and "killed" not in st.fired:
                 st.fired.add("killed")
                 self.stats["kills"] += 1
+                # 小丑学院：死在原地也要炸一下
+                if st.has("z_clowncollege") and "clown" not in st.fired:
+                    st.fired.add("clown")
+                    self._clown_burst(z, plants)
                 self._on_zombie_killed(st, z["addr"])
 
     # ------------------------------------------------ 原生护盾（防具）
@@ -1443,6 +1657,24 @@ class Engine:
                 best, best_d = z, d
         return best
 
+    def _clown_burst(self, z, plants):
+        """小丑学院：死亡后在原地爆炸，炸周围植物。
+
+        ★ 为什么不是「真的召唤一只小丑僵尸」：
+        生成僵尸要走 Board::AddZombie，需要远程调用游戏代码（CreateRemoteThread）
+        或手工构造整个 Zombie 对象（含 reanim / 音效 / 状态机初始化），
+        失败会直接崩游戏。这里只保留**自爆**这个玩法核心：
+        在原位造成一次范围伤害，半径和伤害都是可调的。
+        """
+        hit = 0
+        for p in plants:
+            if abs(p["x"] - z["x"]) <= self.Z_CLOWN_RADIUS and \
+               abs(p["y"] - z["y"]) <= self.Z_CLOWN_RADIUS:
+                self._damage_plant(p, self.Z_CLOWN_DMG)
+                hit += 1
+        self.events.append(("zombie", z["addr"], "小丑学院", self.Z_CLOWN_DMG))
+        return hit
+
     def _on_zombie_killed(self, st, addr):
         """击杀奖励：收集者。"""
         src = st.last_src
@@ -1498,11 +1730,42 @@ class Engine:
         if st.has("p_farsight") and z["x"] < self.P_FARSIGHT_RANGE:
             extra += dmg * self.P_FARSIGHT
             tag = "远射天资"
+        # ---- v1.6 ----
+        if st.has("p_bigpea"):
+            # 大豌豆：伤害翻倍（攻速降低已在 +0x5C 上真实生效）
+            extra += dmg * self.P_BIGPEA_DMG
+            tag = "大腕"
+        if st.has("p_giantkiller"):
+            # 每 10 点僵尸最大生命 → +1%，封顶 +200%
+            ratio = min(self.P_GIANTKILLER_CAP,
+                        (z["state"].hp_max / 10.0) * self.P_GIANTKILLER_PER_10HP)
+            extra += dmg * ratio
+            tag = tag or "巨人杀手"
         return extra, tag
 
     def _plant_after_hit(self, p, z, dmg, now, zombies):
-        """命中之后的附带效果：电龙魂溅射。"""
+        """命中之后的附带效果：电龙魂溅射 / 大腕击退 / 花晓之剑回血。"""
         st = p["state"]
+
+        # --- 大腕：把命中的僵尸往回推一格（+x 是朝右，即远离房子） ---
+        if st.has("p_bigpea"):
+            self._nudge_x(z, self.P_BIGPEA_KNOCK)
+            zst = z.get("state")
+            if zst is not None:
+                zst.prev_x = None       # 瞬移了一段，别让移速自适应误判
+                zst.chill_prev_x = None
+            self.events.append(("zombie", z["addr"], "大腕击退",
+                                self.P_BIGPEA_KNOCK))
+
+        # --- 花晓之剑：按造成伤害的比例回复自身已损失生命 ---
+        if st.has("p_bloodsword"):
+            lost = st.hp_max - p["hp"]
+            if lost > 0:
+                heal = min(lost, dmg * self.P_BLOODSWORD_RATIO)
+                if heal >= 1:
+                    self._set_plant_hp(p, p["hp"] + heal)
+                    self.events.append(("plant", p["addr"], "花晓之剑", heal))
+
         if st.has("p_storm") and now - st.last_aoe >= self.P_STORM_CD:
             st.last_aoe = now
             splash = max(1.0, dmg * self.P_STORM_DMG)
