@@ -9,7 +9,7 @@
 
 ## 直接玩（不用写代码）
 
-1. 去 [Releases](https://github.com/zzzxhdyyzn12424/pvz-hextech/releases) 下载 `PVZ海克斯版_v1.6.0.zip`
+1. 去 [Releases](https://github.com/zzzxhdyyzn12424/pvz-hextech/releases) 下载 `PVZ_Hextech_v1.6.0.zip`
 2. 解压，**先打开游戏并进入一关**（让场上出现植物和僵尸）
 3. 双击 `PVZ海克斯版.exe`
 
@@ -387,15 +387,21 @@ preview.png
 海克斯版不是 pak 补丁，而是挂在游戏旁边的独立程序，分发方式完全不同：
 
 ```bat
-.venv\Scripts\python.exe tools\make_release.py
+.venv\Scripts\python.exe tools\make_release.py --version 1.6.0
+.venv\Scripts\python.exe tools\gh_release.py --version 1.6.0
 ```
 
-产出（`build/release_hextech/`）：
+`make_release.py` 在 `build/release_hextech/` 产出本地中文名 zip；
+`gh_release.py` 负责建 Release 并上传，**上传时会映射成 ASCII 资产名**
+（GitHub 的 API 会把 `name` 参数里的非 ASCII 字符整段剥掉，
+`PVZ海克斯版_v1.6.0.zip` 会变成 `PVZ._v1.6.0.zip`，所以必须换名）。
+
+Releases 上的资产：
 
 | 文件 | 大小 | 说明 |
 |---|---|---|
-| `PVZ海克斯版_v1.6.0.zip` | ~29 MB | 单文件 exe，玩家双击即用，不需要 Python |
-| `PVZ海克斯版_v1.6.0_源码版.zip` | ~63 KB | 纯 Python 脚本，杀软误报时的兜底方案 |
+| `PVZ_Hextech_v1.6.0.zip` | ~29 MB | 单文件 exe，玩家双击即用，不需要 Python |
+| `PVZ_Hextech_v1.6.0_src.zip` | ~70 KB | 纯 Python 脚本，杀软误报时的兜底方案 |
 
 玩家侧流程：
 
