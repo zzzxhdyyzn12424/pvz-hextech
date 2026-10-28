@@ -340,7 +340,7 @@ HEX_DEFS = [
          desc="体型缩小，移速增加 150%。"),
     dict(id="z_clowncollege", name="小丑学院", short="丑", tier=SILVER, scope="zombie",
          impl=True, need="死亡时原位范围爆炸",
-         desc="死亡后在自身所在位置爆炸，对周围植物造成伤害。"),
+         desc="死亡后在自身所在位置爆炸，把周围一格内的植物几乎全部清空。"),
     dict(id="z_smallkiller", name="小小杀手", short="小", tier=SILVER, scope="zombie",
          impl=True, need="碰撞盒缩小 + 移速补位移 + 伤害 +50%",
          desc="体型缩小，移速增加 100%，造成的伤害增加 50%。"),
@@ -792,7 +792,7 @@ class Engine:
     Z_MADMAN_SPEED = 1.50       # 科学狂人：移速 +150%
     Z_MADMAN_SCALE = 0.60       # 科学狂人：碰撞盒缩到 60%
     Z_CLOWN_RADIUS = 90         # 小丑学院：爆炸半径
-    Z_CLOWN_DMG = 180           # 小丑学院：爆炸伤害（对植物）
+    Z_CLOWN_DMG = 1800          # 小丑学院：爆炸伤害（对植物，基本等于秒杀）
     Z_SMALLKILLER_SPEED = 1.00  # 小小杀手：移速 +100%
     Z_SMALLKILLER_DMG = 0.50    # 小小杀手：伤害 +50%
     Z_SMALLKILLER_SCALE = 0.60  # 小小杀手：碰撞盒缩到 60%

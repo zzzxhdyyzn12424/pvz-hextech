@@ -56,14 +56,14 @@ PVZ海克斯版.exe
 
 | 部分 | 状态 | 位置 |
 |---|---|---|
-| **海克斯版** | ✅ 44 条词条全部实现，133 项测试 | `tools/hextech*.py` |
+| **海克斯版** | ✅ 44 条词条全部实现，134 项测试 | `tools/hextech*.py` |
 | 贴图工具链 | ✅ 可用，AI 出图 → 游戏分部件 PNG | `tools/*_textures.py`、`tools/build_mod.py` |
 | 行为模块（DLL 注入） | ⏸ 已暂停，三条钩子零命中 | `behavior/` |
 
 ### 海克斯版：开发
 
 ```bat
-run.bat tools\test_hextech.py        :: 133 项离线回归，不需要游戏
+run.bat tools\test_hextech.py        :: 134 项离线回归，不需要游戏
 run.bat tools\hextech.py run         :: 启动覆盖层（需要游戏在跑）
 run.bat tools\hextech.py panel       :: 打开词条面板
 run.bat tools\probe_shoot.py test 12 :: 上机验证「真的多射豌豆」

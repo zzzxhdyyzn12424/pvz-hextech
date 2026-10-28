@@ -930,12 +930,18 @@ def t_new_hexes_v16():
     check("小小杀手：植物多掉 50", g.i32(P_ADDR + C.P_HP), 150)
 
     # ---- 小丑学院 ----
+    g, eng = setup(plant_hp=2000, z_x=100, z_hexes=("z_clowncollege",))
+    damage_zombie(g, 1000)
+    step(g, eng, 2)
+    check("小丑学院：植物被炸掉 1800", g.i32(P_ADDR + C.P_HP), 200)
+    check("小丑学院：只炸一次",
+          "clown" in eng.zombie_state[Z_ADDR].fired, True)
+
+    # 300 血的普通植物挨 1800 = 直接归零，不会变负数
     g, eng = setup(plant_hp=300, z_x=100, z_hexes=("z_clowncollege",))
     damage_zombie(g, 1000)
     step(g, eng, 2)
-    check("小丑学院：植物被炸掉 180", g.i32(P_ADDR + C.P_HP), 120)
-    check("小丑学院：只炸一次",
-          "clown" in eng.zombie_state[Z_ADDR].fired, True)
+    check("小丑学院：300 血植物被秒", g.i32(P_ADDR + C.P_HP), 0)
 
     # ---- 男爵之手 ----
     baron = run_speed(("z_baron",))
