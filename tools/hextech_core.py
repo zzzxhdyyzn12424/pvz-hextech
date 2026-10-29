@@ -142,7 +142,10 @@ OUTPUT_PLANTS = {
     0, 5, 7, 8, 10, 18, 21, 26, 28, 29,
     32, 34, 39, 40, 42, 43, 44, 46, 47,
 }
-TANK_PLANTS = {3, 23, 30, 33, 36}
+TANK_PLANTS = {3, 23, 30, 36}
+# 承伤类：坚果墙 / 高坚果 / 南瓜头 / 大蒜
+# 花盆（33）曾经也在这里，但 25 阳光换「泰坦巨人」300→900 血太便宜，踢出去了。
+# 代价是花盆的池子只剩「会心防御」一条 —— 反正它就是个托盘。
 SLOW_PLANTS = {5, 44}
 # 生产类植物：向日葵 / 阳光菇 / 金盏花 / 双子向日葵 —— 专属光环词条
 # （它们既不在输出、也不在承伤/减速里，不归到这里的话池子只剩「会心防御」一条）
@@ -347,6 +350,9 @@ HEX_DEFS = [
     dict(id="z_baron", name="男爵之手", short="爵", tier=SILVER, scope="zombie",
          impl=True, need="全场僵尸光环",
          desc="在场时强化所有僵尸：移速 +50%，伤害 +50%。"),
+    dict(id="z_titanresolve", name="泰坦的坚决", short="坚", tier=SILVER, scope="zombie",
+         impl=True,
+         desc="每次受到伤害，永久增加 5% 免伤（最多 75%）。"),
 ]
 
 # 互斥组：同一只僵尸身上不会同时出现组内两条
@@ -743,6 +749,8 @@ class Engine:
     Z_LONE_RANGE_X = 85         # 孤勇者：判定半径
     Z_LONE_RANGE_Y = 100
     Z_LONE_SPEED = 1.00         # 孤勇者：+100% 移速（= ×2）
+    Z_TITANRESOLVE_PER_HIT = 0.05   # 泰坦的坚决（僵尸版）：每次受伤 +5% 免伤
+    Z_TITANRESOLVE_CAP = 0.75       # 泰坦的坚决（僵尸版）：免伤上限 75%
     # 注意：僵尸没有像植物 +0x5C 那样找到「啃食间隔」字段，
     # 所以下面所有僵尸攻速词条都是「等量增伤」——数值等价，但不真的多咬几口。
     Z_LONE_ATKSPD = 0.50        # 孤勇者：+50% 攻速（等量增伤）
@@ -804,9 +812,13 @@ class Engine:
     # 换成别的类型只要改这里，护盾吸收逻辑不用动。
     Z_SHIELD_TYPE = 1
 
-    def __init__(self, game, seed=None):
+    def __init__(self, game, seed=None, preset=None):
         self.g = game
         self.rng = random.Random(seed)
+        # preset: {(kind, addr): [hex_id, ...]}，命中就不随机抽。
+        # 测试用：避免「先随机抽一帧、再覆盖」把世界状态改掉
+        # （例如随机抽到闪现向前会把僵尸推走 90px）。
+        self._preset = dict(preset) if preset else {}
         self.plant_state = {}       # addr -> ObjState
         self.zombie_state = {}
         self.objects = []           # 最近一帧的对象快照（含 hexes）
@@ -834,8 +846,12 @@ class Engine:
             alive.add(a)
             st = state_map.get(a)
             if st is None:
-                count = self._count_for(wave)
-                hexes = roll_hexes(kind, count, o.get("type"), self.rng)
+                fixed = self._preset.get((kind, a))
+                if fixed is not None:
+                    hexes = list(fixed)
+                else:
+                    count = self._count_for(wave)
+                    hexes = roll_hexes(kind, count, o.get("type"), self.rng)
                 st = ObjState(hexes, o.get("hp_max") or o["hp"])
                 state_map[a] = st
                 self.events.append((kind, a, "spawn", hexes))
@@ -1502,6 +1518,13 @@ class Engine:
                 # 孤勇者：9 宫格没别的僵尸 → 50% 免伤
                 if st.has("z_lone") and self._lonely.get(z["addr"]):
                     net *= (1 - self.Z_LONE_DR)
+                # 泰坦的坚决：按「本次受伤前」已有的层数减伤（从下一次开始变硬）
+                if st.has("z_titanresolve") and st.resolve_stacks > 0:
+                    tr = min(self.Z_TITANRESOLVE_CAP,
+                             st.resolve_stacks * self.Z_TITANRESOLVE_PER_HIT)
+                    net *= (1 - tr)
+                    self.events.append(("zombie", z["addr"], "泰坦的坚决",
+                                        total * tr))
                 # 死之舞：40% 转成流血
                 if st.has("z_deathdance") and net > 0:
                     deferred = net * self.Z_DEATHDANCE_RATIO
@@ -1516,6 +1539,13 @@ class Engine:
                     self._set_zombie_hp(z, hp + int(round(dmg - net)))
                     if bonus > 0.5 and tag:
                         self.events.append(("zombie", z["addr"], tag, bonus))
+
+                # 泰坦的坚决：这次受伤让它更硬（从下一次开始生效）
+                if st.has("z_titanresolve"):
+                    cap = int(round(self.Z_TITANRESOLVE_CAP /
+                                    self.Z_TITANRESOLVE_PER_HIT))
+                    if st.resolve_stacks < cap:
+                        st.resolve_stacks += 1
 
                 # 豪猪：反弹 20% 所受伤害给攻击它的植物
                 if st.has("z_porcupine") and src is not None and dmg > 0.5:

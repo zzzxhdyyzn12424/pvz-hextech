@@ -191,20 +191,25 @@ def step(g, eng, n=1, dt=1.0 / 30.0, move=False, anim=None):
 
 def setup(plant_type=0, plant_hp=300, z_hp=1000, z_x=300, p_hexes=(),
           z_hexes=(), two_zombies=False):
-    """建一个干净的场景，并强制指定双方词条（绕开随机）。"""
+    """建一个干净的场景，并强制指定双方词条（绕开随机）。
+
+    词条走 preset 从第一帧就生效，不是「先随机跑两帧再覆盖」——
+    否则随机抽到的闪现向前 / 泰坦巨人 / 星界躯体 会把血量、坐标、
+    阳光这些世界状态改掉，后面的断言全跟着漂。
+    """
     g = MockGame()
     add_plant(g, plant_type, 0, 0, plant_hp)
     add_zombie(g, z_hp, z_x, 80)
     if two_zombies:
         add_zombie(g, z_hp, z_x + 40, 80, addr=Z2_ADDR)
-    eng = C.Engine(g, seed=1)
+    preset = {
+        ("plant", P_ADDR): list(p_hexes),
+        ("zombie", Z_ADDR): list(z_hexes),
+        ("zombie", Z2_ADDR): list(z_hexes),
+    }
+    eng = C.Engine(g, seed=1, preset=preset)
     eng.last_tick = 0.0
     step(g, eng, 2)
-    eng.plant_state[P_ADDR].hexes = list(p_hexes)
-    eng.zombie_state[Z_ADDR].hexes = list(z_hexes)
-    if two_zombies:
-        eng.zombie_state[Z2_ADDR].hexes = list(z_hexes)
-    step(g, eng, 1)     # 让引擎把护盾之类的初始状态写进内存
     return g, eng
 
 
@@ -967,6 +972,39 @@ def t_new_hexes_v16():
     other = x0 - g.f32(Z2_ADDR + C.O_FX)
     check("男爵之手：光环让别的僵尸 ×1.5", round(other / plain, 1), 1.5)
 
+    # ---- 泰坦的坚决（僵尸版）----
+    g, eng = setup(z_hp=1000, z_hexes=("z_titanresolve",))
+    damage_zombie(g, 100)
+    step(g, eng, 2)
+    check("僵尸泰坦的坚决：第一次不减伤", g.i32(Z_ADDR + C.Z_HP), 900)
+    check("僵尸泰坦的坚决：叠到 1 层",
+          eng.zombie_state[Z_ADDR].resolve_stacks, 1)
+
+    damage_zombie(g, 100)
+    step(g, eng, 2)
+    check("僵尸泰坦的坚决：第二次减伤 5%", g.i32(Z_ADDR + C.Z_HP), 805)
+
+    # 15 层 = 75% 上限
+    g, eng = setup(z_hp=1000, z_hexes=("z_titanresolve",))
+    eng.zombie_state[Z_ADDR].resolve_stacks = 15
+    damage_zombie(g, 100)
+    step(g, eng, 2)
+    check("僵尸泰坦的坚决：15 层 = 75% 免伤", g.i32(Z_ADDR + C.Z_HP), 975)
+
+    # 超过上限不再叠
+    g, eng = setup(z_hp=1000, z_hexes=("z_titanresolve",))
+    eng.zombie_state[Z_ADDR].resolve_stacks = 30
+    damage_zombie(g, 100)
+    step(g, eng, 2)
+    check("僵尸泰坦的坚决：超上限仍是 75%", g.i32(Z_ADDR + C.Z_HP), 975)
+
+    # ---- 花盆移出承伤池 ----
+    bowl = [d["name"] for d in C.pool_for("plant", 33, tier=C.SILVER)]
+    check("花盆抽不到泰坦巨人", "泰坦巨人" in bowl, False)
+    check("花盆抽不到泰坦的坚决", "泰坦的坚决" in bowl, False)
+    wall = [d["name"] for d in C.pool_for("plant", 3, tier=C.SILVER)]
+    check("坚果墙仍能抽到泰坦巨人", "泰坦巨人" in wall, True)
+
     # ==================== 规则 ====================
     bad = 0
     for seed in range(300):
@@ -987,12 +1025,12 @@ def t_new_hexes_v16():
     check("植物新词条都能抽到", len(want_plant & seen), 6)
 
     want_z = {"z_goliath", "z_madman", "z_clowncollege",
-              "z_smallkiller", "z_baron"}
+              "z_smallkiller", "z_baron", "z_titanresolve"}
     seen = set()
     for seed in range(300):
         rng = __import__("random").Random(seed)
         seen |= set(C.roll_hexes("zombie", 3, None, rng))
-    check("僵尸新词条都能抽到", len(want_z & seen), 5)
+    check("僵尸新词条都能抽到", len(want_z & seen), 6)
 
 
 def main():
