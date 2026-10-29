@@ -27,6 +27,11 @@ probe_shoot.py —— 验证「植物攻速 = 真的多射豌豆」
         把射击间隔改成 原值/1.25（灵巧），观测 12 秒，报告每秒开火次数，
         结束时自动还原。期望从 ~0.67 提升到 ~0.83（+25%）。
 
+    python tools/probe_shoot.py slow 24
+        验证反方向：带【大腕】的植物 +0x5C 应该是 600（150×4）。
+        观测 24 秒，报告每次开火后 +0x58 被重置成的值、以及两次开火的
+        实际间隔。期望：重置值 ≈ 600、间隔 ≈ 20 秒、是原版的 4 倍。
+
 注意：PVZ 失焦/最小化会自动暂停，观测期间必须让游戏窗口保持前台。
 """
 
@@ -170,6 +175,86 @@ def cmd_test(game, seconds):
     print("  已还原 +0x5C = %d" % base)
 
 
+def cmd_slow(game, seconds):
+    """验证「把 +0x5C 调大 = 真的少射」（大腕 / 攻速降低类）。
+
+    和 test 相反：test 证明调小能多射，slow 证明调大能少射。
+    判据有两条，缺一不可：
+      1. 开火后 +0x58 被重置成的值 ≈ +0x5C（而不是被夹回原版 150）
+      2. 两次开火的墙钟间隔 ≈ +0x5C / 100 秒
+
+    ★ 帧率是 100 Hz 不是 30 Hz：游戏每秒 Update 100 次（Zombie+0x60 实测）。
+      所以 150 帧 = 1.5 秒一发（0.67 发/秒），600 帧 = 6 秒一发。
+      用 30 算会得出「20 秒一发」的错误期望。
+    """
+    fps = C.Engine.Z_SPEED_HZ
+    ps = find_shooters(game)
+    if not ps:
+        print("没找到会射击的植物。先进关卡种一株豌豆射手。")
+        return
+
+    print("观测 %d 株植物 %.0f 秒（游戏 %.0f Update/秒，所以 N 帧 = N/%.0f 秒）"
+          % (len(ps), seconds, fps, fps))
+    print("请让游戏窗口保持在前台……")
+    print()
+
+    # 同时采样所有植物：每个 addr 一个「上一次读数」
+    prev = {p["addr"]: game.i32(p["addr"] + C.P_SHOOT_COUNTER) for p in ps}
+    resets = {p["addr"]: [] for p in ps}
+    t0 = time.time()
+    while time.time() - t0 < seconds:
+        for p in ps:
+            a = p["addr"] + C.P_SHOOT_COUNTER
+            v = game.i32(a)
+            pv = prev[p["addr"]]
+            if v is not None and pv is not None and v - pv > 20:
+                resets[p["addr"]].append((time.time() - t0, v))
+            prev[p["addr"]] = v
+        time.sleep(0.012)
+    dur = time.time() - t0
+
+    print("%-4s %-3s %-3s %-8s %-6s %-9s %-9s %-9s" %
+          ("行", "列", "间隔", "理论间隔", "开火", "实测间隔", "重置值", "判定"))
+    print("-" * 66)
+    for p in sorted(ps, key=lambda x: -x["interval"]):
+        rs = resets[p["addr"]]
+        want = p["interval"] / fps
+        gaps = [rs[i + 1][0] - rs[i][0] for i in range(len(rs) - 1)]
+        avg = sum(gaps) / len(gaps) if gaps else None
+        top = max((v for _, v in rs), default=None)
+        if avg is None:
+            verdict = "开火<2次"
+        elif abs(avg - want) <= max(0.35, want * 0.25):
+            verdict = "OK"
+        else:
+            verdict = "偏差大"
+        print("%-4d %-3d %-8d %-9.2f %-6d %-9s %-9s %-9s" % (
+            p["row"], p["col"], p["interval"], want, len(rs),
+            ("%.2f" % avg) if avg else "-",
+            top if top is not None else "-", verdict))
+
+    print()
+    slow = [p for p in ps if p["interval"] >= 500]
+    fast = [p for p in ps if p["interval"] <= 200]
+    if slow and fast:
+        ratio = (sum(p["interval"] for p in slow) / len(slow)) / \
+                (sum(p["interval"] for p in fast) / len(fast))
+        print("带大腕的 %d 株 平均间隔 %.0f 帧，原版 %d 株 平均 %.0f 帧，比值 %.2fx"
+              % (len(slow), sum(p["interval"] for p in slow) / len(slow),
+                 len(fast), sum(p["interval"] for p in fast) / len(fast), ratio))
+        ok_reset = any(
+            max((v for _, v in resets[p["addr"]]), default=0) >= p["interval"] - 16
+            for p in slow if resets[p["addr"]])
+        if ok_reset and 3.5 <= ratio <= 4.5:
+            print("[OK] 攻速确实降了：+0x58 被重置到 ~%d，游戏按这个帧数在等。"
+                  % slow[0]["interval"])
+            print("     不是数值补偿，是真的少生成了豌豆。")
+        else:
+            print("[!!] 没验证到，看上面表格里哪一行偏差大。")
+    else:
+        print("场上没有同时存在「带大腕」和「原版」的植物，只能看表格单行。")
+
+
 def main(argv):
     if not argv:
         print(__doc__)
@@ -192,6 +277,8 @@ def main(argv):
             cmd_count(game, float(argv[1]) if len(argv) > 1 else 12.0)
         elif cmd == "test":
             cmd_test(game, float(argv[1]) if len(argv) > 1 else 12.0)
+        elif cmd == "slow":
+            cmd_slow(game, float(argv[1]) if len(argv) > 1 else 24.0)
         else:
             print("未知命令：%s" % cmd)
             print(__doc__)
