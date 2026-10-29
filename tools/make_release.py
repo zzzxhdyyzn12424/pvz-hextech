@@ -4,17 +4,17 @@ make_release.py —— 生成可以发给别人的发布包
 
 产出（默认在 build/release_hextech/ 下）：
 
-    PVZ海克斯版_v1.6.1/
+    PVZ海克斯版_v1.6.2/
         PVZ海克斯版.exe          ← 双击就能用，玩家不需要装 Python
         使用说明.txt
         版本要求.txt
-    PVZ海克斯版_v1.6.1.zip
+    PVZ海克斯版_v1.6.2.zip
 
-    PVZ海克斯版_v1.6.1_源码版/
+    PVZ海克斯版_v1.6.2_源码版/
         tools/launcher.py 等
         启动.bat
         使用说明.txt
-    PVZ海克斯版_v1.6.1_源码版.zip
+    PVZ海克斯版_v1.6.2_源码版.zip
 
 为什么两个包都发：
 
@@ -40,7 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
 MOD_NAME = "PVZ海克斯版"
-DEFAULT_VERSION = "1.6.1"
+DEFAULT_VERSION = "1.6.2"
 
 BUILD_ROOT = os.path.join(ROOT, "build", "release_hextech")
 DIST_DIR = os.path.join(BUILD_ROOT, "dist")
@@ -189,7 +189,7 @@ def version_text(version, is_src):
   · 年度版 / 杂交版 / 任何改过代码段的版本 —— 不要用
 
 【词条数量】
-  45 条（植物 21 + 僵尸 24），全部已实现
+  46 条（植物 21 + 僵尸 25），全部已实现
 
 【已知限制】
   · 僵尸的「啃食间隔」字段尚未定位，僵尸攻速类词条

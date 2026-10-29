@@ -998,6 +998,45 @@ def t_new_hexes_v16():
     step(g, eng, 2)
     check("僵尸泰坦的坚决：超上限仍是 75%", g.i32(Z_ADDR + C.Z_HP), 975)
 
+    # ---- 水龙魂：受伤后 / 啃食时每秒回 20 血 ----
+    # 30 帧 = 1.0 秒（step 固定 dt=1/30）
+    g, eng = setup(z_hp=1000, z_x=100, z_hexes=("z_waterdragon",))
+    damage_zombie(g, 100)
+    step(g, eng, 2)
+    hp0 = g.i32(Z_ADDR + C.Z_HP)
+    check("水龙魂：受伤后开始回血", hp0 > 900, True)
+    step(g, eng, 30)
+    check("水龙魂：1 秒回 20（不是 30）",
+          g.i32(Z_ADDR + C.Z_HP) - hp0, 20)
+
+    # 脱战（3 秒内没受伤、也没在啃）→ 停止回血
+    st = eng.zombie_state[Z_ADDR]
+    st.last_hit = time.time() - 10
+    st.last_bite = time.time() - 10
+    before = g.i32(Z_ADDR + C.Z_HP)
+    step(g, eng, 30)
+    check("水龙魂：脱战不回血", g.i32(Z_ADDR + C.Z_HP) - before, 0)
+
+    # 啃植物时，即使早就没挨过打也回血
+    g, eng = setup(z_hp=1000, plant_hp=5000, z_x=100,
+                   z_hexes=("z_waterdragon",))
+    damage_zombie(g, 100)
+    step(g, eng, 2)
+    eng.zombie_state[Z_ADDR].last_hit = time.time() - 10   # 假装很久没挨打
+    damage_plant(g, 20)                                    # 咬一口 → 记下 last_bite
+    step(g, eng, 1)
+    hp0 = g.i32(Z_ADDR + C.Z_HP)
+    step(g, eng, 30)
+    check("水龙魂：啃食时也回血",
+          g.i32(Z_ADDR + C.Z_HP) - hp0 >= 19, True)
+
+    # 满血不溢出
+    g, eng = setup(z_hp=1000, z_hexes=("z_waterdragon",))
+    damage_zombie(g, 10)
+    step(g, eng, 2)
+    step(g, eng, 120)          # 4 秒，足够回满还有余
+    check("水龙魂：回血不会超上限", g.i32(Z_ADDR + C.Z_HP), 1000)
+
     # ---- 花盆移出承伤池 ----
     bowl = [d["name"] for d in C.pool_for("plant", 33, tier=C.SILVER)]
     check("花盆抽不到泰坦巨人", "泰坦巨人" in bowl, False)
@@ -1025,12 +1064,13 @@ def t_new_hexes_v16():
     check("植物新词条都能抽到", len(want_plant & seen), 6)
 
     want_z = {"z_goliath", "z_madman", "z_clowncollege",
-              "z_smallkiller", "z_baron", "z_titanresolve"}
+              "z_smallkiller", "z_baron", "z_titanresolve",
+              "z_waterdragon"}
     seen = set()
     for seed in range(300):
         rng = __import__("random").Random(seed)
         seen |= set(C.roll_hexes("zombie", 3, None, rng))
-    check("僵尸新词条都能抽到", len(want_z & seen), 6)
+    check("僵尸新词条都能抽到", len(want_z & seen), 7)
 
 
 def main():

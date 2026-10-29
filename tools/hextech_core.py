@@ -353,6 +353,9 @@ HEX_DEFS = [
     dict(id="z_titanresolve", name="泰坦的坚决", short="坚", tier=SILVER, scope="zombie",
          impl=True,
          desc="每次受到伤害，永久增加 5% 免伤（最多 75%）。"),
+    dict(id="z_waterdragon", name="水龙魂", short="水", tier=SILVER, scope="zombie",
+         impl=True,
+         desc="受伤后或在啃食植物时，每秒回复 20 点生命值。"),
 ]
 
 # 互斥组：同一只僵尸身上不会同时出现组内两条
@@ -643,7 +646,9 @@ class ObjState:
                  "shoot_base",
                  # v1.6
                  "resolve_stacks", "scale_done", "goliath_done",
-                 "titan_hp_done", "titan_sun_done", "base_w", "base_h")
+                 "titan_hp_done", "titan_sun_done", "base_w", "base_h",
+                 # v1.6.2
+                 "last_bite", "regen_acc")
 
     def __init__(self, hexes, hp):
         self.hexes = hexes
@@ -679,6 +684,9 @@ class ObjState:
         self.titan_sun_done = False # 泰坦巨人额外阳光是否已扣
         self.base_w = 0             # 原始宽（体型缩放前）
         self.base_h = 0             # 原始高
+        # ---- v1.6.2 ----
+        self.last_bite = 0.0        # 水龙魂：最近一次啃到植物的时刻
+        self.regen_acc = 0.0        # 水龙魂：不足 1 点的回血攒着
 
     def has(self, hid):
         return hid in self.hexes
@@ -751,6 +759,9 @@ class Engine:
     Z_LONE_SPEED = 1.00         # 孤勇者：+100% 移速（= ×2）
     Z_TITANRESOLVE_PER_HIT = 0.05   # 泰坦的坚决（僵尸版）：每次受伤 +5% 免伤
     Z_TITANRESOLVE_CAP = 0.75       # 泰坦的坚决（僵尸版）：免伤上限 75%
+    Z_WATERDRAGON_REGEN = 20.0      # 水龙魂：每秒回复血量
+    Z_WATERDRAGON_WINDOW = 3.0      # 水龙魂：受伤后 3 秒内都算「受伤状态」
+    Z_WATERDRAGON_BITE = 1.0        # 水龙魂：1 秒内啃过植物就算「正在吃」
     # 注意：僵尸没有像植物 +0x5C 那样找到「啃食间隔」字段，
     # 所以下面所有僵尸攻速词条都是「等量增伤」——数值等价，但不真的多咬几口。
     Z_LONE_ATKSPD = 0.50        # 孤勇者：+50% 攻速（等量增伤）
@@ -1341,6 +1352,7 @@ class Engine:
         st = z["state"]
         extra = 0.0
         tag = None
+        st.last_bite = now          # 水龙魂：记下「正在吃植物」
 
         # 僵尸攻速类词条：啃食间隔字段尚未定位，用等量增伤模拟 DPS
         # （植物侧已改走真实射击间隔 +0x5C，见 _plant_shoot_apply）
@@ -1559,6 +1571,9 @@ class Engine:
             # 增伤当成一次新的命中，35% 增伤会被反复叠乘成无限伤害。
             st.hp_prev = z["hp"]
 
+            # --- 水龙魂：受伤后 / 正在啃植物时，每秒回 20 血 ---
+            self._waterdragon_regen(z, st, now, dt)
+
             # --- 移速加成：每帧补位移到 Zombie+0x2C ---
             # 不能写速度字段 +0x34，游戏每帧会把它夹回目标值（见 _speed_apply）
             self._speed_apply(z, st, now, dt)
@@ -1675,6 +1690,26 @@ class Engine:
         z["hp"] = new
         st.hp_prev = new
         return new
+
+    def _waterdragon_regen(self, z, st, now, dt):
+        """水龙魂：受伤后 3 秒内、或正在啃植物时，每秒回 20 血。
+
+        两个条件任意一个成立就回血；都不成立（脱战且满血站着）就停。
+        用累加器而不是每帧直接加：30 帧/秒下 20 血/秒 = 0.67 血/帧，
+        直接 round 会变成每帧 +1，实际变成 30 血/秒。
+        """
+        if not st.has("z_waterdragon"):
+            return
+        hurt = (now - st.last_hit) <= self.Z_WATERDRAGON_WINDOW
+        biting = (now - st.last_bite) <= self.Z_WATERDRAGON_BITE
+        if not (hurt or biting) or z["hp"] >= st.hp_max:
+            st.regen_acc = 0.0
+            return
+        st.regen_acc += self.Z_WATERDRAGON_REGEN * dt
+        if st.regen_acc >= 1.0:
+            n = int(st.regen_acc)
+            st.regen_acc -= n
+            self._heal_zombie(z, n)
 
     def _attribute_zombie(self, p, zombies):
         """反查：谁在啃这株植物（同行、水平距离最近）。"""
