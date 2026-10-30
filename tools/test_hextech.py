@@ -1421,6 +1421,94 @@ def t_blindbox():
     check("盲盒：排除池只剩豌豆", eng.blindbox["type"], 0)
 
 
+def t_deepfish():
+    """v1.7.1：大肥鱼 —— 移植自融合版究极植物。"""
+    print("\n[13] 大肥鱼（v1.7.1）")
+
+    # ---- 上场血量顶到 8 万 ----
+    g, eng = setup(p_hexes=("p_deepfish",))
+    p = g.plants[0]
+    check("大肥鱼：内存血量", g.i32(P_ADDR + C.P_HP), 80000)
+    check("大肥鱼：内存血量上限", g.i32(P_ADDR + C.P_HP_MAX), 80000)
+    check("大肥鱼：快照血量", p["hp"], 80000)
+
+    # ---- 建一个可控的三只僵尸场景 ----
+    def fish_game(chance=0.0, interval=0.5, hp=20000):
+        gg = MockGame()
+        add_plant(gg, 0, 0, 0, 300)
+        add_zombie(gg, hp, 300, 80, addr=Z_ADDR)
+        add_zombie(gg, hp, 450, 80, addr=Z2_ADDR)
+        add_zombie(gg, hp, 800, 80, addr=Z3_ADDR)
+        ee = C.Engine(gg, seed=1,
+                      preset={("plant", P_ADDR): ["p_deepfish"]})
+        ee.P_FISH_NUKE_CHANCE = chance
+        ee.P_FISH_INTERVAL = interval
+        ee.last_tick = 0.0
+        step(gg, ee, 1)
+        return gg, ee
+
+    def hps(gg):
+        return [gg.i32(a + C.Z_HP) for a in (Z_ADDR, Z2_ADDR, Z3_ADDR)]
+
+    # ---- 索敌 + 5×5 范围 ----
+    g, eng = fish_game()
+    a, b, c = hps(g)
+    check("大肥鱼：最近的僵尸被炸", a, 12000)
+    check("大肥鱼：范围内第二只也被炸", b, 12000)
+    check("大肥鱼：范围外的不受影响", c, 20000)
+
+    # ---- 出手间隔：0.5 秒内不重复 ----
+    step(g, eng, 3)
+    check("大肥鱼：间隔内不再出手", hps(g)[0], 12000)
+    # 把上次出手时间拨到过去，模拟过了 0.5 秒
+    eng.plant_state[P_ADDR].fish_last = time.time() - 1.0
+    step(g, eng, 1)
+    check("大肥鱼：到点再次出手", hps(g)[0], 4000)
+
+    # ---- 全场核爆：概率拉满 / 拉零 ----
+    g, eng = fish_game(chance=1.0, hp=100000)
+    a, b, c = hps(g)
+    check("全场核爆：最近的也吃满", a, 100000 - 8000 - 50000)
+    check("全场核爆：范围内再吃一份", b, 100000 - 8000 - 50000)
+    check("全场核爆：范围外也吃", c, 100000 - 50000)
+
+    g, eng = fish_game(chance=0.0)
+    check("全场核爆：概率为零就不触发", hps(g)[2], 20000)
+
+    # ---- 强抽 ----
+    g = MockGame()
+    add_plant(g, 0, 0, 0, 300)
+    add_zombie(g, 20000, 300, 80)
+    eng = C.Engine(g, seed=1, preset={})
+    eng.HEX_FORCE = ("p_deepfish",)
+    step(g, eng, 1)
+    check("大肥鱼：HEX_FORCE 能强抽", g.i32(P_ADDR + C.P_HP_MAX), 80000)
+    check("大肥鱼：强抽不串到僵尸",
+          eng.zombie_state[Z_ADDR].has("p_deepfish"), False)
+
+    # ---- 究极档不污染普通抽卡 ----
+    old = C.PRISMATIC_CHANCE
+    try:
+        C.PRISMATIC_CHANCE = 0.0
+        got = set()
+        for i in range(200):
+            got.update(C.roll_hexes("plant", 3, 0, C.random.Random(i)))
+        check("大肥鱼：关掉究极档就抽不到", "p_deepfish" in got, False)
+        C.PRISMATIC_CHANCE = 1.0
+        got = set()
+        for i in range(200):
+            got.update(C.roll_hexes("plant", 3, 0, C.random.Random(i)))
+        check("大肥鱼：究极档拉满能抽到", "p_deepfish" in got, True)
+    finally:
+        C.PRISMATIC_CHANCE = old
+
+    # ---- 档位与作用范围 ----
+    d = C.HEX_BY_ID["p_deepfish"]
+    check("大肥鱼：究极档", d["tier"], C.PRISMATIC)
+    check("大肥鱼：所有植物都能抽",
+          len(C.pool_for("plant", 33, tier=C.PRISMATIC)), 1)
+
+
 def main():
     t_rules()
     t_zombie_defence()
@@ -1434,6 +1522,7 @@ def main():
     t_shoot_base_recover()
     t_unstoppable()
     t_blindbox()
+    t_deepfish()
 
     print("\n" + "=" * 52)
     if FAILED:

@@ -144,6 +144,10 @@ SEED_IMITATER = 0x38        # mImitaterType（只有变身茄子卡用）
 SEED_ACTIVE = 0x48          # byte，1 = 可以点
 SEED_COOLING = 0x49         # byte，1 = 冷却中
 SEED_USES = 0x4C            # int，用了几次（只增不减，用来检测「刚种下」）
+# SeedType 合法范围是 -1 .. 51（不是 48）。49/50/51 是迷你游戏 / 禅境花园专用的
+# 爆炸坚果 / 巨型坚果 / 幼苗，gPlantDefs 里有完整条目。52 之后是 0xFF 填充。
+SEED_TYPE_MAX = 51
+SEED_TYPE_PLAYABLE_MAX = 48   # 玩家能选的卡：0..48
 
 # ---- 植物定义表 gPlantDefs（0x488F76  lea edx,[ecx+ecx*8] → *0x24）----
 #   0x488F76  mov eax, [edx*4+0x69f2c4]   ; = gPlantDefs[type].mRefreshTime
@@ -159,6 +163,9 @@ PLANTDEF_RATE = 0x0C
 COUNT_MODE = "random"
 HEX_MIN, HEX_MAX = 1, 3
 HEX_CAP = 3
+# 究极档（目前只有「大肥鱼」）不占普通池的名额：先掷一次，掷中了才把它
+# 并进候选池。8% × 池子里约 1/23 ≈ 每株 0.7%，够稀罕但不至于见不到。
+PRISMATIC_CHANCE = 0.08
 
 
 def hex_count_for_wave(wave):
@@ -312,6 +319,18 @@ HEX_DEFS = [
          apply="sun", impl=True,
          desc="每 5 秒为随机一株植物回复 100 血。"),
 
+    # ---------------- 究极（移植自融合版，见 docs/hextech_values.md §大肥鱼）----
+    # 融合版的「DeepSeek大肥鱼」是究极级二创植物：80000 血、无冷却、全场索敌、
+    # 5×5 核爆 8000、8% 概率全场每格 5 万。
+    # 它搬不过来的只有外观动画（融合版自己移植别人植物时也卡在同一处，
+    # 最后只能烘焙成一张静态贴图）；玩法全部能用「血量通道 + 范围伤害」还原。
+    dict(id="p_deepfish", name="大肥鱼", short="鱼", tier=PRISMATIC,
+         scope="plant", impl=True, apply="all",
+         need="血量 8 万、全场索敌、5×5 核爆",
+         desc="血量 8 万。每 0.5 秒锁定离房子最近的僵尸，在其脚下引爆 5×5 格核爆"
+              "（8000 伤害），不分行、不分左右；每次出手另有 8% 概率引发全场核爆"
+              "（每只 5 万）。"),
+
     # ---------------- 僵尸 ----------------
     dict(id="z_escape", name="逃跑计划", short="逃", tier=SILVER, scope="zombie",
          impl=True, need="移速补位移",
@@ -441,6 +460,9 @@ def roll_hexes(kind, count, plant_type=None, rng=None):
     """无放回抽 count 个词条（不可重复，且互斥组内最多一条）。"""
     rng = rng or random
     pool = pool_for(kind, plant_type, tier=SILVER)
+    # 究极档低概率单独放进来（不占名额，掷中了才并池）
+    if rng.random() < PRISMATIC_CHANCE:
+        pool = pool + pool_for(kind, plant_type, tier=PRISMATIC)
     if not pool:
         return []
     count = min(count, len(pool))
@@ -673,6 +695,35 @@ class Game:
                 h=struct.unpack_from("<i", raw, off + O_H)[0],
             ))
 
+    # ---------- 植物搬格子（同格叠种 = 融合）----------
+    # 为什么能这么干：Board::GetPlantAt(0x40D1A0) 是「线性扫植物数组，
+    # 比对 Plant+0x1C(row) / +0x28(col)」，没有网格缓存数组。
+    # 而南瓜头 / 睡莲 / 花盆 / 咖啡豆本来就和宿主同格 —— 引擎原生支持一格里有多株，
+    # 只是靠 Plant+0x134 / +0x142 之类的标志位决定谁是「格子的主体」。
+    # 所以把一株的 row/col/mX/mY 改到另一株的格子上，两株就叠住了。
+    def move_plant(self, addr, row=None, col=None, x=None, y=None):
+        ok = True
+        if row is not None:
+            ok = self.write_i32(addr + P_ROW, row) and ok
+        if col is not None:
+            ok = self.write_i32(addr + P_COL, col) and ok
+        if x is not None:
+            ok = self.write_i32(addr + O_X, x) and ok
+        if y is not None:
+            ok = self.write_i32(addr + O_Y, y) and ok
+        return bool(ok)
+
+    def fuse_plant(self, src, dst):
+        """把 src 搬到 dst 的格子上。
+
+        坐标直接抄 dst 的现值，不自己算 —— 泳池 / 屋顶 / 月夜这些场景的
+        格子基准不一样，抄现值永远对得上。
+        """
+        if src["addr"] == dst["addr"]:
+            return False
+        return self.move_plant(src["addr"], row=dst["row"], col=dst["col"],
+                               x=dst["x"], y=dst["y"])
+
     # ---------- 种子银行 ----------
     def seedbank(self):
         """返回 SeedBank 基址，读不到就是 None。"""
@@ -687,7 +738,7 @@ class Game:
         字段自检（任何一项对不上就整段作废，宁可不干活也别乱写内存）：
             mNumPackets 必须落在 1..10
             每张卡的 +0x00/+0x04 必须等于 gLawnApp / Board（GameObject 指纹）
-            mPacketType 必须是 -1 或 0..48
+            mPacketType 必须是 -1 或 0..51（49/50/51 是迷你游戏植物）
         """
         sb = self.seedbank()
         b = self.board
@@ -706,7 +757,7 @@ class Game:
             if struct.unpack_from("<II", raw, off) != (gapp, b):
                 return []          # 指纹不对，结构猜错了
             ptype, imit = struct.unpack_from("<ii", raw, off + SEED_TYPE)
-            if not (-1 <= ptype <= 48):
+            if not (-1 <= ptype <= SEED_TYPE_MAX):
                 return []
             out.append(dict(
                 addr=sb + SB_FIRST + off, kind="seed", slot=i,
@@ -739,7 +790,9 @@ class ObjState:
                  # v1.6.2
                  "last_bite", "regen_acc",
                  # v1.6.6
-                 "cc_until")
+                 "cc_until",
+                 # v1.7.1
+                 "fish_last")
 
     def __init__(self, hexes, hp):
         self.hexes = hexes
@@ -780,6 +833,7 @@ class ObjState:
         self.regen_acc = 0.0        # 水龙魂：不足 1 点的回血攒着
         # ---- v1.6.6 ----
         self.cc_until = 0.0         # 终极不可阻挡：免疫控制的到期时刻
+        self.fish_last = 0.0        # 大肥鱼：上次出手的时刻
 
     def has(self, hid):
         return hid in self.hexes
@@ -910,6 +964,20 @@ class Engine:
     P_THORNMAIL = 0.50          # 荆棘之甲：反弹 50% 所受伤害
     P_TITAN_COST = 1.00         # 泰坦巨人：种植额外消耗 100% 阳光
     P_TITAN_HP = 2.00           # 泰坦巨人：血量上限 +200%（= ×3）
+
+    # ---- 大肥鱼（移植自融合版究极植物，见 docs/hextech_values.md §大肥鱼）----
+    # 原版数据：80000 血 / 无冷却 / 全场自动索敌 / 5×5 格核爆 8000 /
+    #           8% 概率全场核爆每格 5 万 / 阳光 500
+    P_FISH_HP = 80000           # 上场血量
+    P_FISH_DMG = 8000           # 单次核爆伤害（5×5 格）
+    P_FISH_RADIUS_X = 200       # 5 格 × 80px / 2
+    P_FISH_RADIUS_Y = 250       # 5 行 × 100px / 2
+    # 原版写的是「无冷却」，但真按每帧引爆，8000/帧 会瞬间清空整关。
+    # 这里给一个可调的出手节奏，0 = 每帧都打（不推荐）。
+    P_FISH_INTERVAL = 0.5       # 秒
+    P_FISH_NUKE_CHANCE = 0.08   # 每次出手额外触发全场核爆的概率
+    P_FISH_NUKE_DMG = 50000     # 全场核爆伤害
+    P_FISH_COST = 0             # 抽到时补扣多少阳光（原版成本 500，默认不扣）
     P_GIANTKILLER_PER_10HP = 0.01   # 巨人杀手：僵尸每 10 点最大血 → +1%
     P_GIANTKILLER_CAP = 2.00        # 巨人杀手：增伤上限 +200%
 
@@ -945,6 +1013,11 @@ class Engine:
     # 随机池：全部 49 种。想排除特定植物就删掉对应 ID。
     BLINDBOX_POOL = tuple(range(49))
     BLINDBOX_EXCLUDE = ()       # 例如 (16, 19, 43) 排除需要水面的
+
+    # ---- 抽卡强制（调试 / 想直接玩某条词条时用）----
+    # 例：Engine.HEX_FORCE = ("p_deepfish",)  → 场上每株植物都带大肥鱼
+    # 只对 scope 匹配的对象生效，写植物词条不会串到僵尸身上。
+    HEX_FORCE = ()
 
     def __init__(self, game, seed=None, preset=None):
         self.g = game
@@ -984,6 +1057,11 @@ class Engine:
             st = state_map.get(a)
             if st is None:
                 fixed = self._preset.get((kind, a))
+                if fixed is None and self.HEX_FORCE:
+                    forced = [h for h in self.HEX_FORCE
+                              if h in HEX_BY_ID and HEX_BY_ID[h]["scope"] == kind]
+                    if forced:
+                        fixed = forced
                 if fixed is not None:
                     hexes = list(fixed)
                 else:
@@ -995,6 +1073,9 @@ class Engine:
                 # 泰坦巨人：抽到的瞬间就收第二份阳光
                 if kind == "plant" and "p_titan" in hexes:
                     self._titan_charge(o, st)
+                # 大肥鱼：抽到的瞬间血量顶到 8 万
+                if kind == "plant" and "p_deepfish" in hexes:
+                    self._fish_charge(o, st)
             o["hexes"] = st.hexes
             o["state"] = st
         # 清理已消失的对象
@@ -1179,6 +1260,10 @@ class Engine:
 
             # --- 攻速：缩短原生射击间隔 +0x5C，让游戏真的多生成子弹 ---
             self._plant_shoot_apply(p, st)
+
+            # --- 大肥鱼：全场索敌 + 5×5 核爆 ---
+            if st.has("p_deepfish"):
+                self._deepfish_tick(p, st, zombies, now)
 
             # --- 山脉龙魂：脱战回盾 ---
             if st.has("p_mountain"):
@@ -1367,6 +1452,53 @@ class Engine:
         if extra > 0:
             self.g.add_sun(-extra)
             self.events.append(("plant", p["addr"], "泰坦巨人阳光", extra))
+
+    def _fish_charge(self, p, st):
+        """大肥鱼：上场就把血量顶到 8 万。
+
+        注意：这里不能走 _set_plant_hp —— 它要读 p["state"]，
+        而 _ensure_hexes 里这个调用发生在 o["state"] 赋值之前。
+        """
+        if st.hp_max >= self.P_FISH_HP:
+            return
+        st.hp_max = self.P_FISH_HP
+        st.hp_prev = self.P_FISH_HP
+        p["hp"] = self.P_FISH_HP
+        p["hp_max"] = self.P_FISH_HP
+        self.g.write_i32(p["addr"] + P_HP_MAX, self.P_FISH_HP)
+        self.g.write_i32(p["addr"] + P_HP, self.P_FISH_HP)
+        if self.P_FISH_COST:
+            self.g.add_sun(-self.P_FISH_COST)
+        self.events.append(("plant", p["addr"], "大肥鱼", self.P_FISH_HP))
+
+    def _deepfish_tick(self, p, st, zombies, now):
+        """大肥鱼：锁定离房子最近的僵尸，脚下引爆 5×5 核爆。
+
+        ★ 为什么这个能搬、杂交体不能搬：
+        融合版的大肥鱼是**新植物**，但它要的行为只有两件事 ——
+        「全场找最近的僵尸」和「范围伤害」。前者我们本来就每帧扫全表，
+        后者就是血量通道，都不需要新代码路径。
+        真正搬不过来的只有外观动画（4 个舞蹈 + 1 个吃饭动作）。
+        """
+        if not zombies:
+            return
+        if now - st.fish_last < self.P_FISH_INTERVAL:
+            return
+        st.fish_last = now
+
+        # 离房子最近 = x 最小（僵尸往左走）
+        tgt = min(zombies, key=lambda z: z["x"])
+        for z in zombies:
+            if abs(z["x"] - tgt["x"]) <= self.P_FISH_RADIUS_X and \
+               abs(z["y"] - tgt["y"]) <= self.P_FISH_RADIUS_Y:
+                self._damage_zombie(z, self.P_FISH_DMG, source="plant")
+        self.events.append(("plant", p["addr"], "大肥鱼", self.P_FISH_DMG))
+
+        if self.rng.random() < self.P_FISH_NUKE_CHANCE:
+            for z in list(zombies):
+                self._damage_zombie(z, self.P_FISH_NUKE_DMG, source="plant")
+            self.events.append(("plant", p["addr"], "全场核爆",
+                                self.P_FISH_NUKE_DMG))
 
     def _devotion_rescue(self, p, plants):
         """全心为你：找一株相邻、还没用过的向日葵替这株植物去死。"""
