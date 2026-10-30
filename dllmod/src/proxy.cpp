@@ -18,6 +18,7 @@
 #include "engine.h"
 #include "hook.h"
 #include "log.h"
+#include "overlay.h"
 #include "pvz.h"
 
 namespace {
@@ -39,6 +40,9 @@ DWORD WINAPI StatThread(LPVOID) {
     if (!hooked) {
         hx::Log("[!] 挂钩失败，退回 100ms 轮询（每帧重算类词条会不准）");
     }
+
+    // 面板单独一个线程，不参与词条逻辑
+    hx::OverlayStart();
 
     hx::Snapshot prev;
     int idle = 0;

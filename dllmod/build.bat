@@ -55,9 +55,9 @@ if errorlevel 1 (
 
 echo [4/4] compiling wsock32.dll ...
 "%CXX%" %CFLAGS% -I"%SRC%" -I"%GEN%" -shared ^
-  "%SRC%\proxy.cpp" "%SRC%\engine.cpp" "%SRC%\hook.cpp" "%SRC%\detour.S" "%GEN%\proxy.def" ^
+  "%SRC%\proxy.cpp" "%SRC%\engine.cpp" "%SRC%\hook.cpp" "%SRC%\overlay.cpp" "%SRC%\detour.S" "%GEN%\proxy.def" ^
   -o "%OUT%\wsock32.dll" ^
-  -static -luser32
+  -static -luser32 -lgdi32
 if errorlevel 1 (
   echo [!] build failed
   exit /b 1

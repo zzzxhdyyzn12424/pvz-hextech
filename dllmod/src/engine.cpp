@@ -459,8 +459,7 @@ void Engine::ApplyZombieFrame(const Obj& z, ObjState& st, bool baron) {
 
 void Engine::Tick() {
     ++frame_;
-    now_ms_ = GetTickCount();
-    Scan();
+    now_ms_ = GetTickCount();    Scan();
     EnsureHexes(plants_, plant_state_, Scope::Plant, "plant");
     EnsureHexes(zombies_, zombie_state_, Scope::Zombie, "zombie");
     stats_plant_ = (int)plants_.size();
@@ -491,13 +490,80 @@ void Engine::Tick() {
         auto it = zombie_state_.find(z.addr);
         if (it != zombie_state_.end()) ApplyZombieFrame(z, it->second, baron);
     }
+
+    // 面板快照：4Hz 重建，别每帧拼字符串
+    if (now_ms_ - last_ov_ms_ >= 250) {
+        last_ov_ms_ = now_ms_;
+        BuildOverlay();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 面板数据
+//
+// 字符串在**游戏线程**里一次性拼好（这里），面板线程只读快照 ——
+// 两边不共享可变状态，也不用担心面板线程读到半更新的 map。
+// ---------------------------------------------------------------------------
+void Engine::BuildOverlay() {
+    std::vector<OverlayRow> rows;
+    rows.reserve(plants_.size() + zombies_.size());
+
+    auto add = [&](const Obj& o, std::map<uintptr_t, ObjState>& sm, bool plant) {
+        auto it = sm.find(o.addr);
+        if (it == sm.end()) return;
+        const ObjState& st = it->second;
+
+        OverlayRow r;
+        r.plant  = plant;
+        r.idx    = o.idx;
+        r.type   = o.type;
+        r.hp     = o.hp;
+        r.hp_max = st.hp_max;
+        r.shield = st.shield;
+
+        const char* nm = "";
+        if (plant) {
+            if (o.type >= 0 && o.type < kPlantNamesCount) nm = kPlantNames[o.type];
+        } else {
+            if (o.type >= 0 && o.type < kZombieNamesCount) nm = kZombieNames[o.type];
+        }
+        if (nm && *nm) r.name = nm;
+        else r.name = "类型" + std::to_string(o.type);
+        r.shield = st.shield;
+
+        for (int h : st.hexes) {
+            if (!r.hexes.empty()) r.hexes += "·";
+            r.hexes += kHexDefs[h].name;
+        }
+        if (r.hexes.empty()) r.hexes = "-";
+        rows.push_back(std::move(r));
+    };
+
+    for (const Obj& p : plants_)  add(p, plant_state_,  true);
+    for (const Obj& z : zombies_) add(z, zombie_state_, false);
+
+    std::lock_guard<std::mutex> lk(ov_mx_);
+    ov_rows_.swap(rows);
+    ov_plants_   = (int)plants_.size();
+    ov_zombies_  = (int)zombies_.size();
+    ov_stamp_ms_ = now_ms_;
+}
+
+void Engine::CopyOverlay(std::vector<OverlayRow>& out, int& plants, int& zombies,
+                         uint32_t& age_ms) const {
+    std::lock_guard<std::mutex> lk(ov_mx_);
+    out      = ov_rows_;
+    plants   = ov_plants_;
+    zombies  = ov_zombies_;
+    uint32_t now = GetTickCount();
+    age_ms = (ov_stamp_ms_ && now >= ov_stamp_ms_) ? (now - ov_stamp_ms_)
+                                                   : 0xFFFFFFFFu;
 }
 
 Engine& GetEngine() {
     static Engine e;
     return e;
 }
-
 // ---------------------------------------------------------------------------
 // 游戏每帧回调（detour.S 调进来）
 //

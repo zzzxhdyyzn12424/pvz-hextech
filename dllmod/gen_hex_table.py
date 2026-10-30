@@ -77,6 +77,25 @@ def main():
     lines.append("};")
     lines.append("inline const int kExclGroupCount = %d;" % len(groups))
     lines.append("")
+
+    # ---- 植物 / 僵尸名字表（面板要显示中文名，别在 C++ 里再抄一遍）----
+    def emit_names(cname, d):
+        n = (max(d) + 1) if d else 1
+        lines.append("inline const char* const %s[] = {" % cname)
+        row = []
+        for i in range(n):
+            row.append(cstr(d.get(i, "")))
+            if len(row) == 6:
+                lines.append("    " + ", ".join(row) + ",")
+                row = []
+        if row:
+            lines.append("    " + ", ".join(row) + ",")
+        lines.append("};")
+        lines.append("inline const int %sCount = %d;" % (cname, n))
+        lines.append("")
+
+    emit_names("kPlantNames", getattr(C, "PLANT_NAMES", {}))
+    emit_names("kZombieNames", getattr(C, "ZOMBIE_NAMES", {}))
     lines.append("}  // namespace hx")
 
     with open(out, "w", encoding="utf-8", newline="\n") as f:

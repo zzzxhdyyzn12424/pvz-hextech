@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <mutex>
 #include <random>
 #include <set>
 #include <string>
@@ -135,6 +136,23 @@ class Engine {
 public:
     void Init(unsigned seed);
 
+    // 面板用的一行。字符串在 Tick 里（游戏线程）一次性拼好，
+    // 面板线程只读快照，两边不共享状态。
+    struct OverlayRow {
+        bool plant = false;
+        int idx = 0;
+        int type = 0;
+        int hp = 0;
+        int hp_max = 0;
+        int shield = 0;      // 原生护盾槽里的当前值（山脉龙魂 / 逃跑计划）
+        std::string name;
+        std::string hexes;
+    };
+
+    // 跨线程取面板数据（内部加锁）
+    void CopyOverlay(std::vector<OverlayRow>& out, int& plants, int& zombies,
+                     uint32_t& age_ms) const;
+
     // 每帧调用（游戏 Board::Update 开头）
     void Tick();
 
@@ -165,6 +183,7 @@ private:
                      std::map<uintptr_t, ObjState>& state_map,
                      Scope scope, const char* kind);
     void ApplyOnSpawn(const Obj& o, ObjState& st, const char* kind);
+    void BuildOverlay();
 
     // 每帧重算类
     void ApplyPlantFrame(const Obj& p, ObjState& st);
@@ -184,6 +203,14 @@ private:
     std::vector<SpdRow> spd_rows_;
     uint32_t now_ms_ = 0;            // 本帧的 GetTickCount
     uint32_t last_spd_ms_ = 0;       // 上次重建 spd_rows_ 的时刻
+
+    // ---- 面板快照（游戏线程写、面板线程读，靠 ov_mx_ 保护）----
+    mutable std::mutex ov_mx_;
+    std::vector<OverlayRow> ov_rows_;
+    int ov_plants_ = 0;
+    int ov_zombies_ = 0;
+    uint32_t ov_stamp_ms_ = 0;
+    uint32_t last_ov_ms_ = 0;
     uintptr_t last_board_ = 0;
     uint32_t frame_ = 0;
 };
