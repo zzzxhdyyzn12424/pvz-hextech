@@ -67,5 +67,91 @@ constexpr double Z_NUDGE_MAX_PER_FRAME = 3.0;
 constexpr double Z_MADMAN_SCALE      = 0.60;        // Z_MADMAN_SCALE
 constexpr double Z_SMALLKILLER_SCALE = 0.60;        // Z_SMALLKILLER_SCALE
 
+// ===========================================================================
+//  战斗（伤害反应类词条）
+// ===========================================================================
+
+// ---- 植物增伤 ----
+constexpr double P_POWER          = 0.35;    // P_POWER 大力
+constexpr double P_ZEALOT_DOUBLE  = 0.25;    // P_ZEALOT_DOUBLE
+constexpr double P_FARSIGHT       = 0.50;    // P_FARSIGHT
+constexpr int    P_FARSIGHT_RANGE = 200;     // P_FARSIGHT_RANGE
+constexpr double P_BIGPEA_DMG     = 5.00;    // P_BIGPEA_DMG（+500% = ×6）
+constexpr int    P_BIGPEA_KNOCK   = 80;      // P_BIGPEA_KNOCK（一格 = 80px）
+constexpr double P_GIANTKILLER_PER_10HP = 0.01;
+constexpr double P_GIANTKILLER_CAP = 2.00;
+constexpr double P_BLOODSWORD_RATIO = 0.30;  // P_BLOODSWORD_RATIO
+constexpr uint32_t P_STORM_CD     = 5000;    // P_STORM_CD = 5s
+constexpr int    P_STORM_RADIUS   = 90;
+constexpr double P_STORM_DMG      = 0.50;
+constexpr double P_CRITDEF        = 0.25;    // P_CRITDEF 会心防御
+constexpr double P_TITANRESOLVE_PER_HIT = 0.05;
+constexpr double P_TITANRESOLVE_CAP = 0.75;
+constexpr double P_THORNMAIL      = 0.50;    // P_THORNMAIL 荆棘之甲
+constexpr int    P_COLLECTOR_SUN  = 50;
+constexpr double P_INSPIRE_DMG    = 0.20;    // P_INSPIRE_DMG 鼓舞
+constexpr double P_WIND_DR        = 0.25;    // P_WIND_DR 风语者祝福
+constexpr double P_CHILL_EXTRA    = 0.30;    // P_CHILL_EXTRA 冰寒
+constexpr uint32_t P_CHILL_TIME   = 3000;    // P_CHILL_TIME = 3s
+
+// ---- 草坪网格（大腕「击退一格」要按真实格子算）----
+constexpr int LAWN_XMIN   = 40;
+constexpr int LAWN_CELL_W = 80;
+constexpr int LAWN_COLS   = 9;
+
+// ---- 僵尸侧 ----
+constexpr double Z_HEAVY_RATIO     = 0.05;   // Z_HEAVY_RATIO
+constexpr double Z_BLOODTHIRST     = 0.30;   // Z_BLOODTHIRST
+constexpr double Z_DEATHDANCE_RATIO = 0.40;  // Z_DEATHDANCE_RATIO
+constexpr uint32_t Z_DEATHDANCE_TIME = 3000; // Z_DEATHDANCE_TIME = 3s
+constexpr double Z_LONE_DR         = 0.50;   // Z_LONE_DR
+constexpr double Z_TITANRESOLVE_PER_HIT = 0.05;
+constexpr double Z_TITANRESOLVE_CAP = 0.75;
+constexpr double Z_WATERDRAGON_REGEN = 20.0; // Z_WATERDRAGON_REGEN
+constexpr uint32_t Z_WATERDRAGON_WINDOW = 3000;
+constexpr double Z_UNYIELDING_ATKSPD = 2.00;
+constexpr double Z_UNYIELDING_LIFESTEAL = 0.70;
+constexpr double Z_SWIFT_SPEED     = 0.25;
+constexpr double Z_ZEALOT_SPEED    = 0.15;
+constexpr double Z_ZEALOT_DOUBLE   = 0.25;
+constexpr double Z_LONE_ATKSPD     = 0.50;
+constexpr double Z_GOLIATH_DMG     = 0.50;
+constexpr double Z_SMALLKILLER_DMG = 0.50;
+constexpr double Z_BARON_DMG       = 0.50;
+constexpr double Z_ASTRAL_DMG      = 0.30;
+constexpr double Z_ARMORCRASH_RATIO = 1.00;
+constexpr int    Z_ARMORCRASH_RANGE = 90;
+constexpr double Z_BANG_RATIO      = 0.50;
+constexpr int    Z_BANG_RANGE      = 90;
+constexpr int    Z_FLASH_CHARGES   = 2;
+constexpr int    Z_FLASH_DIST      = 90;
+constexpr double Z_PORCUPINE       = 0.20;
+constexpr int    Z_CLOWN_RADIUS    = 90;
+constexpr int    Z_CLOWN_DMG       = 1800;
+constexpr double Z_SCOPE_DPS       = 100.0;
+constexpr int    Z_SCOPE_REACH_1   = 160;
+constexpr int    Z_SCOPE_REACH     = 240;
+
+// ---- 大肥鱼 / 献祭 / 守护 ----
+constexpr int    P_FISH_DMG       = 8000;    // P_FISH_DMG
+constexpr int    P_FISH_RADIUS_X  = 200;     // P_FISH_RADIUS_X（5 格）
+constexpr int    P_FISH_RADIUS_Y  = 250;     // P_FISH_RADIUS_Y（5 行）
+constexpr uint32_t P_FISH_INTERVAL = 500;    // P_FISH_INTERVAL = 0.5s
+constexpr double P_FISH_NUKE_CHANCE = 0.08;  // P_FISH_NUKE_CHANCE
+constexpr int    P_FISH_NUKE_DMG  = 50000;   // P_FISH_NUKE_DMG
+constexpr double P_SACRIFICE_RATIO = 0.02;   // P_SACRIFICE_RATIO
+constexpr int    P_SACRIFICE_SUN   = 5;      // P_SACRIFICE_SUN
+constexpr int    P_SACRIFICE_CELLS = 6;      // P_SACRIFICE_RANGE
+constexpr uint32_t P_SACRIFICE_CD  = 1000;   // P_SACRIFICE_CD = 1s
+constexpr uint32_t P_GUARDIAN_CD   = 5000;   // P_GUARDIAN_CD = 5s
+constexpr int    P_GUARDIAN_HEAL   = 100;    // P_GUARDIAN_HEAL
+constexpr int    P_DEVOTION_HEAL   = 100;    // P_DEVOTION_HEAL
+constexpr double Z_UNSTOPPABLE_TIME = 10.0;  // Z_UNSTOPPABLE_TIME（秒）
+
+// ---- 判定半径 ----
+constexpr int AURA_RANGE_X = 85;   // AURA_RANGE_X
+constexpr int AURA_RANGE_Y = 100;  // AURA_RANGE_Y
+constexpr int ROW_TOL      = 60;   // 「同一行」的 y 容差（外置版到处用 60）
+
 }  // namespace tune
 }  // namespace hx
