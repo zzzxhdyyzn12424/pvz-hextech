@@ -356,6 +356,9 @@ HEX_DEFS = [
     dict(id="z_waterdragon", name="水龙魂", short="水", tier=SILVER, scope="zombie",
          impl=True,
          desc="受伤后或在啃食植物时，每秒回复 20 点生命值。"),
+    dict(id="z_unstoppable", name="终极不可阻挡", short="阻", tier=SILVER,
+         scope="zombie", impl=True, need="受伤后 10 秒免疫控制，仅一次",
+         desc="首次受伤后 10 秒内免疫一切控制：不被减速、不被冰冻拖住、不被击退。每只僵尸只触发一次。"),
 ]
 
 # 互斥组：同一只僵尸身上不会同时出现组内两条
@@ -648,7 +651,9 @@ class ObjState:
                  "resolve_stacks", "scale_done", "goliath_done",
                  "titan_hp_done", "titan_sun_done", "base_w", "base_h",
                  # v1.6.2
-                 "last_bite", "regen_acc")
+                 "last_bite", "regen_acc",
+                 # v1.6.6
+                 "cc_until")
 
     def __init__(self, hexes, hp):
         self.hexes = hexes
@@ -687,6 +692,8 @@ class ObjState:
         # ---- v1.6.2 ----
         self.last_bite = 0.0        # 水龙魂：最近一次啃到植物的时刻
         self.regen_acc = 0.0        # 水龙魂：不足 1 点的回血攒着
+        # ---- v1.6.6 ----
+        self.cc_until = 0.0         # 终极不可阻挡：免疫控制的到期时刻
 
     def has(self, hid):
         return hid in self.hexes
@@ -767,6 +774,10 @@ class Engine:
     Z_WATERDRAGON_REGEN = 20.0      # 水龙魂：每秒回复血量
     Z_WATERDRAGON_WINDOW = 3.0      # 水龙魂：受伤后 3 秒内都算「受伤状态」
     Z_WATERDRAGON_BITE = 1.0        # 水龙魂：1 秒内啃过植物就算「正在吃」
+    Z_UNSTOPPABLE_TIME = 10.0       # 终极不可阻挡：首次受伤后免疫控制的时长
+    # 免疫期间「正在啃植物」的判定窗口。啃食时僵尸本来就不动，
+    # 这时候补位移会把它从植物嘴边推开，所以窗口内不推。
+    Z_UNSTOPPABLE_EAT_GRACE = 0.5
     # 注意：僵尸没有像植物 +0x5C 那样找到「啃食间隔」字段，
     # 所以下面所有僵尸攻速词条都是「等量增伤」——数值等价，但不真的多咬几口。
     Z_LONE_ATKSPD = 0.50        # 孤勇者：+50% 攻速（等量增伤）
@@ -1219,7 +1230,7 @@ class Engine:
         x0 = self.LAWN_XMIN + c * self.LAWN_CELL_W
         return c, x0, x0 + self.LAWN_CELL_W
 
-    def _knock_cell(self, z, zombies, px):
+    def _knock_cell(self, z, zombies, px, now):
         """把「命中僵尸所在那一格」里的**所有**僵尸一起推开 px 像素。
 
         设计原文：「可将命中的那一格的僵尸击退一格」——是整格，不是单只。
@@ -1236,8 +1247,11 @@ class Engine:
                 continue
             if not (x0 <= o["x"] < x1):             # 不在同一列
                 continue
-            self._nudge_x(o, px)
             ost = o.get("state")
+            # 终极不可阻挡：窗口内免疫击退（整格推也推不动它）
+            if ost is not None and self._cc_immune(ost, now):
+                continue
+            self._nudge_x(o, px)
             if ost is not None:
                 ost.prev_x = None        # 瞬移了一段，别让移速自适应误判
                 ost.chill_prev_x = None
@@ -1270,7 +1284,7 @@ class Engine:
             bonus += self.Z_ESCAPE_SPEED * left
         return bonus
 
-    def _speed_apply(self, z, st, now, dt):
+    def _speed_apply(self, z, st, now, dt, plants=()):
         """给僵尸加移速 —— 走「补位移」而不是「改速度字段」。
 
         ★ 为什么不能直接写 Zombie+0x34（上机实测结论，别改回去）：
@@ -1308,12 +1322,22 @@ class Engine:
         而且僵尸在啃植物时它自己不动，我们也不推它（符合直觉）。
         """
         bonus = self._speed_bonus(z, st, now)
-        # 没有移速词条、也没在跟踪 —— 一次内存读都不做
-        if bonus <= 0 and st.prev_x is None:
+        immune = self._cc_immune(st, now)
+        # 不可阻挡的僵尸即使没有移速词条也要跟踪速率 —— 免疫期间拿它当
+        # 「没被控时该走多快」的基准，没有基准就只能靠 +0x34 粗估。
+        track = st.has("z_unstoppable")
+        # 没有移速词条、也没在跟踪、也不在免疫窗口 —— 一次内存读都不做
+        if bonus <= 0 and st.prev_x is None and not immune and not track:
             return
 
         fx = self.g.f32(z["addr"] + O_FX)
         if fx is None:
+            return
+
+        # 终极不可阻挡：不走「观测自己走了多少」那套，直接按原生移速硬推。
+        # 因为被冰冻时它压根不动，观测到的速率是 0，按比例补只会补出 0。
+        if immune:
+            self._cc_immune_move(z, st, bonus, dt, fx, now, plants)
             return
 
         # 第一次见到：先按 +0x34 估一个初始速率（僵尸朝房子走 = x 减小）
@@ -1359,6 +1383,57 @@ class Engine:
         else:
             st.prev_x = fx
 
+    def _cc_immune_move(self, z, st, bonus, dt, fx, now, plants=()):
+        """终极不可阻挡：免疫窗口内按「未受控的移速」推进，无视减速 / 冰冻。
+
+        ★ 为什么不复用上面的自适应逻辑：
+        那套是「观测僵尸自己走了多少，再按比例补」。僵尸被冻住时它压根不动，
+        观测值是 0，补出来还是 0 —— 等于没免疫。所以这里换个思路：
+        直接按「它没被控时该走多快」算出期望位移，差多少补多少。
+
+        参考速率取两者较大值：
+          - st.obs_rate：进窗口前观测到的真实行走速率（被减速过就偏小）
+          - +0x34 换算：游戏自己的目标速度（不受我们影响，是未减速的基准）
+        取大的那个，才不会被「触发时正好在减速状态」拉低。
+
+        两个不推的情况：
+          - 正在啃植物（`last_bite` 窗口内）：啃食时本来就不动，推了会把它
+            从植物嘴边推开。
+          - 前面 50px 内有植物：它停住是因为被植物挡住，不是因为被控。
+            不判这条的话，被冻住的僵尸会被我们一路推进植物身体里。
+        """
+        if st.prev_x is None:                   # 第一帧，先记坐标
+            st.prev_x = fx
+            return
+        if now - st.last_bite <= self.Z_UNSTOPPABLE_EAT_GRACE:
+            st.prev_x = fx                      # 正在啃，别推
+            return
+        zx = z["x"]
+        for p in plants:
+            if abs(p["y"] - z["y"]) < 60 and 0 < zx - p["x"] < 50:
+                st.prev_x = fx                  # 被植物挡住，不是被控
+                return
+
+        v = self.g.f32(z["addr"] + Z_SPEED_FIELD) or 0.0
+        ref = st.obs_rate
+        if 0.001 < v < self.Z_SPEED_MAX:
+            est = -v * self.Z_SPEED_HZ * self.Z_MOVE_DUTY
+            if abs(est) > abs(ref):
+                ref = est
+        if abs(ref) < 1e-3:                     # 完全没有参考值，别乱推
+            st.prev_x = fx
+            return
+
+        want = ref * dt * (1.0 + max(0.0, bonus))   # 期望位移（朝左为负）
+        moved = fx - st.prev_x                      # 上一帧以来游戏自己走的
+        deficit = want - moved
+        if deficit < -0.01:
+            # 单帧最多补 10px，防止速度字段读到脏数据时把僵尸瞬移
+            deficit = max(deficit, -10.0)
+            st.prev_x = self._nudge_x(z, deficit)
+        else:
+            st.prev_x = fx
+
     def _scale_zombie(self, z, st):
         """体型缩小：把碰撞盒 O_W / O_H（+0x10 / +0x14）按比例压小。
 
@@ -1387,6 +1462,14 @@ class Engine:
             self.g.write_i32(z["addr"] + O_H, th)
             z["w"], z["h"] = tw, th
 
+    def _cc_immune(self, st, now):
+        """终极不可阻挡：当前是否处在「免疫控制」窗口内。
+
+        只判时间，不判词条 —— 窗口只有被词条触发时才会被置上，
+        所以没这个词条的僵尸 cc_until 恒为 0，这里永远 False。
+        """
+        return st.cc_until > now
+
     def _chill_apply(self, z, st, now, dt):
         """冰寒：把这一帧的实际位移再压掉一部分，实现「减速效果提升」。
 
@@ -1394,6 +1477,10 @@ class Engine:
         再反向补 `-dx × ratio`，等效于速度再乘 `(1-ratio)`。
         不碰 `+0x34`，原因和移速加成完全一样（每帧会被游戏夹回目标值）。
         """
+        if self._cc_immune(st, now):
+            # 终极不可阻挡窗口内：不叠减速，并清掉跟踪坐标
+            st.chill_prev_x = None
+            return
         if now >= st.chill_until or st.chill_ratio <= 0:
             st.chill_prev_x = None
             return
@@ -1586,6 +1673,16 @@ class Engine:
                 st.last_hit = now
                 st.hits += 1
 
+                # 终极不可阻挡：首次受伤 → 开启 10 秒免疫控制窗口（一次性）
+                if st.has("z_unstoppable") and "unstoppable" not in st.fired:
+                    st.fired.add("unstoppable")
+                    st.cc_until = now + self.Z_UNSTOPPABLE_TIME
+                    st.chill_until = 0.0        # 立刻甩掉身上已有的减速
+                    st.chill_ratio = 0.0
+                    st.chill_prev_x = None
+                    self.events.append(("zombie", z["addr"], "终极不可阻挡",
+                                        self.Z_UNSTOPPABLE_TIME))
+
                 # 先算植物侧的增伤（含鼓舞光环），再一起走减伤
                 src = self._attribute(z, plants)
                 bonus, tag = 0.0, None
@@ -1594,8 +1691,10 @@ class Engine:
                     mult = self._aura.get(src["addr"], (1.0, 0.0))[0]
                     bonus, tag = self._plant_bonus(src, z, dmg, mult)
                     # 冰寒：减速植物命中后，额外压一段移速
+                    # （终极不可阻挡的窗口内直接不吃，控制类效果全免）
                     if src["type"] in SLOW_PLANTS and \
-                       src["state"].has("p_chill") and not st.has("z_legday"):
+                       src["state"].has("p_chill") and not st.has("z_legday") \
+                       and not self._cc_immune(st, now):
                         st.chill_until = now + self.P_CHILL_TIME
                         st.chill_ratio = self.P_CHILL_EXTRA
                         st.chill_prev_x = None
@@ -1652,7 +1751,7 @@ class Engine:
 
             # --- 移速加成：每帧补位移到 Zombie+0x2C ---
             # 不能写速度字段 +0x34，游戏每帧会把它夹回目标值（见 _speed_apply）
-            self._speed_apply(z, st, now, dt)
+            self._speed_apply(z, st, now, dt, plants)
             # --- 冰寒：在原生减速之上再额外压低移速 ---
             self._chill_apply(z, st, now, dt)
 
@@ -1891,7 +1990,7 @@ class Engine:
         # --- 大腕：把命中僵尸所在那一格里的所有僵尸往回推一格 ---
         # （+x 是朝右，即远离房子；同格 = 同行 + 同列 80px 区间）
         if st.has("p_bigpea"):
-            pushed = self._knock_cell(z, zombies, self.P_BIGPEA_KNOCK)
+            pushed = self._knock_cell(z, zombies, self.P_BIGPEA_KNOCK, now)
             self.events.append(("zombie", z["addr"], "大腕击退",
                                 self.P_BIGPEA_KNOCK))
             if len(pushed) > 1:

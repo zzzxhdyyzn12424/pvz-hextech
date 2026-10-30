@@ -1102,12 +1102,12 @@ def t_new_hexes_v16():
 
     want_z = {"z_goliath", "z_madman", "z_clowncollege",
               "z_smallkiller", "z_baron", "z_titanresolve",
-              "z_waterdragon"}
+              "z_waterdragon", "z_unstoppable"}
     seen = set()
     for seed in range(300):
         rng = __import__("random").Random(seed)
         seen |= set(C.roll_hexes("zombie", 3, None, rng))
-    check("僵尸新词条都能抽到", len(want_z & seen), 7)
+    check("僵尸新词条都能抽到", len(want_z & seen), 8)
 
 
 def t_shoot_base_recover():
@@ -1156,6 +1156,94 @@ def t_shoot_base_recover():
     check("投手原生 300 按 ×8 算", reboot(("p_bigpea",), 300), 2400)
 
 
+def t_unstoppable():
+    """v1.6.6：终极不可阻挡 —— 首次受伤后 10 秒免疫控制，只触发一次。"""
+    print("\n[11] 终极不可阻挡（v1.6.6）")
+
+    # ---- 触发与一次性 ----
+    g, eng = setup(z_x=400, z_hexes=("z_unstoppable",))
+    st = eng.zombie_state[Z_ADDR]
+    check("不可阻挡：没受伤不触发", st.cc_until, 0.0)
+    damage_zombie(g, 10)
+    step(g, eng, 1)
+    check("不可阻挡：受伤后窗口开启", st.cc_until > time.time(), True)
+    check("不可阻挡：记下一次性标记", "unstoppable" in st.fired, True)
+    t1 = st.cc_until
+    damage_zombie(g, 10)
+    step(g, eng, 1)
+    check("不可阻挡：第二次受伤不刷新窗口", st.cc_until, t1)
+
+    # 窗口过期后再受伤也不给第二次
+    st.cc_until = time.time() - 1.0
+    damage_zombie(g, 10)
+    step(g, eng, 1)
+    check("不可阻挡：过期后不再给", st.cc_until < time.time(), True)
+
+    # ---- 免疫冰寒（本 mod 的额外减速）----
+    # 冰寒是「减速植物打中僵尸」时上的，所以要打僵尸，不是打植物
+    g, eng = setup(plant_type=5, z_x=100, p_hexes=("p_chill",),
+                   z_hexes=("z_unstoppable",))
+    damage_zombie(g, 10)
+    step(g, eng, 1)                     # 这一下开窗口
+    damage_zombie(g, 10)
+    step(g, eng, 1)                     # 再挨一下：冰寒应该被免疫掉
+    st = eng.zombie_state[Z_ADDR]
+    check("不可阻挡：免疫冰寒", st.chill_ratio, 0.0)
+
+    # 对照：没有这个词条时会吃到冰寒
+    g, eng = setup(plant_type=5, z_x=100, p_hexes=("p_chill",))
+    damage_zombie(g, 10)
+    step(g, eng, 1)
+    check("对照：普通僵尸会吃冰寒",
+          eng.zombie_state[Z_ADDR].chill_ratio > 0, True)
+
+    # ---- 免疫击退（大腕整格击退）----
+    g, eng = setup(z_x=300, p_hexes=("p_bigpea",), z_hexes=("z_unstoppable",))
+    step(g, eng, 30, move=True)          # 先正常走，建立观测速率
+    damage_zombie(g, 10)
+    step(g, eng, 1)                      # 开窗口
+    x0 = g.i32(Z_ADDR + C.O_X)
+    damage_zombie(g, 20)
+    step(g, eng, 2, move=True)
+    check("不可阻挡：免疫大腕击退", g.i32(Z_ADDR + C.O_X) - x0, 0)
+
+    # ---- 免疫减速 / 冰冻：被压到 30% 速度时仍按全速走 ----
+    def run(anim, hexes):
+        g, eng = setup(z_x=400, z_hexes=hexes)
+        step(g, eng, 40, move=True)                 # 建立基准速率
+        if hexes:
+            damage_zombie(g, 10)
+            step(g, eng, 1)                          # 开窗口
+        x1 = g.f32(Z_ADDR + C.O_FX)
+        step(g, eng, 30, move=True, anim=anim)       # 1 秒（30 帧）
+        return x1 - g.f32(Z_ADDR + C.O_FX)
+
+    full = run(1.0, ("z_unstoppable",))
+    frozen = run(0.3, ("z_unstoppable",))
+    plain = run(0.3, ())
+    check("不可阻挡：冰冻下仍走全速", round(frozen / full, 1), 1.0)
+    check("对照：普通僵尸被冻到 30%", plain < full * 0.5, True)
+
+    # ---- 啃植物 / 被植物挡住时不能把它推走 ----
+    g, eng = setup(z_x=60, plant_hp=5000, z_hexes=("z_unstoppable",))
+    damage_zombie(g, 10)
+    step(g, eng, 1)
+    x0 = g.f32(Z_ADDR + C.O_FX)
+    step(g, eng, 10)                     # move=False：游戏自己不推它
+    check("不可阻挡：被植物挡住时不推",
+          abs(g.f32(Z_ADDR + C.O_FX) - x0) < 0.5, True)
+
+    # 对照：前面没植物时，冻住的免疫僵尸会被推着走（真的「不可阻挡」）
+    g, eng = setup(z_x=400, z_hexes=("z_unstoppable",))
+    step(g, eng, 30, move=True)          # 先建立基准速率
+    damage_zombie(g, 10)
+    step(g, eng, 1)
+    x0 = g.f32(Z_ADDR + C.O_FX)
+    step(g, eng, 10)                     # 冻住不动
+    check("不可阻挡：冻住也硬推着走",
+          x0 - g.f32(Z_ADDR + C.O_FX) > 2.0, True)
+
+
 def main():
     t_rules()
     t_damage_boost()
@@ -1168,6 +1256,7 @@ def main():
     t_probe_shoot()
     t_new_hexes_v16()
     t_shoot_base_recover()
+    t_unstoppable()
 
     print("\n" + "=" * 52)
     if FAILED:
