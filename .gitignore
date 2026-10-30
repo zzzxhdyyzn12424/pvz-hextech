@@ -30,3 +30,7 @@ __pycache__/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# ---- dllmod 编译产物 ----
+dllmod/out/
+dllmod/gen/
