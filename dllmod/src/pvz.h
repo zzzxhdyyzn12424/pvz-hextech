@@ -28,8 +28,19 @@ constexpr uint32_t B_SCENE      = 0x554C;
 constexpr uint32_t B_LEVEL      = 0x5550;
 constexpr uint32_t B_SUN        = 0x5560;
 constexpr uint32_t B_WAVE_TOTAL = 0x5564;
-constexpr uint32_t B_WAVE       = 0x5568;
+constexpr uint32_t B_TICK       = 0x5568;   // 实测是「每秒 +100」的帧/计时器，不是波数
 constexpr uint32_t B_SEEDBANK   = 0x144;
+
+// ---- 对象数组 ----
+// 重要：这两个数组是**按值内联的对象数组**，不是指针数组！
+//   Board+0xAC = Plant 对象数组的首地址，第 i 株在 base + i*0x14C
+//   Board+0xB0 = 已用槽位数
+// 每个对象开头是 GameObject 指纹：+0x00 == gLawnApp、+0x04 == Board。
+// （一开始我按「指针数组」写，结果 plants 永远是 0，白折腾一轮。）
+constexpr uint32_t PLANT_STRIDE  = 0x14C;
+constexpr uint32_t ZOMBIE_STRIDE = 0x15C;
+constexpr int MAX_PLANTS  = 512;
+constexpr int MAX_ZOMBIES = 1024;
 
 // ---- GameObject 通用 ----
 constexpr uint32_t O_X = 0x08;
@@ -104,12 +115,32 @@ struct Snapshot {
     int sun = 0;
     int scene = 0;
     int level = 0;
-    int wave = 0;
+    int tick = 0;
     int wave_total = 0;
     int plants = 0;       // 存活植物数
     int zombies = 0;      // 存活僵尸数
     bool valid = false;
 };
+
+// 数一遍某个内联对象数组里的存活个体
+inline int CountAlive(uintptr_t board, uintptr_t app, uint32_t arr_off,
+                      uint32_t cnt_off, uint32_t stride, uint32_t dead_off,
+                      uint32_t hp_off, int hard_max) {
+    uintptr_t base = Ptr(board, arr_off);
+    int cap = Rd<int>(board + cnt_off);
+    if (!base || cap <= 0) return 0;
+    if (cap > hard_max) cap = hard_max;
+    int n = 0;
+    for (int i = 0; i < cap; ++i) {
+        uintptr_t o = base + (uintptr_t)i * stride;
+        if (Rd<uint32_t>(o) != (uint32_t)app) continue;        // 指纹
+        if (Rd<uint32_t>(o + 4) != (uint32_t)board) continue;  // 指纹
+        if (Rd<uint8_t>(o + dead_off)) continue;
+        if (Rd<int>(o + hp_off) <= 0) continue;
+        n++;
+    }
+    return n;
+}
 
 inline Snapshot Grab() {
     Snapshot s;
@@ -124,34 +155,13 @@ inline Snapshot Grab() {
     s.sun        = Rd<int>(s.board + B_SUN);
     s.scene      = Rd<int>(s.board + B_SCENE);
     s.level      = Rd<int>(s.board + B_LEVEL);
-    s.wave       = Rd<int>(s.board + B_WAVE);
+    s.tick       = Rd<int>(s.board + B_TICK);
     s.wave_total = Rd<int>(s.board + B_WAVE_TOTAL);
 
-    // 植物数组：Plant** + 上限
-    uintptr_t parr = Ptr(s.board, B_PLANT);
-    int pmax = Rd<int>(s.board + B_PLANT_MAX);
-    if (parr && pmax > 0 && pmax < 1024) {
-        for (int i = 0; i < pmax; ++i) {
-            uintptr_t p = Rd<uint32_t>(parr + i * 4);
-            if (!Plausible(p)) continue;
-            if (Rd<uint8_t>(p + P_DEAD)) continue;
-            s.plants++;
-        }
-    }
-
-    // 僵尸数组
-    uintptr_t zarr = Ptr(s.board, B_ZOMBIE);
-    int zmax = Rd<int>(s.board + B_ZOMBIE_MAX);
-    if (zarr && zmax > 0 && zmax < 4096) {
-        for (int i = 0; i < zmax; ++i) {
-            uintptr_t z = Rd<uint32_t>(zarr + i * 4);
-            if (!Plausible(z)) continue;
-            if (Rd<uint8_t>(z + Z_DEAD)) continue;
-            s.zombies++;
-        }
-    }
-
-    s.valid = true;
+    s.plants = CountAlive(s.board, s.app, B_PLANT, B_PLANT_MAX,
+                          PLANT_STRIDE, P_DEAD, P_HP, MAX_PLANTS);
+    s.zombies = CountAlive(s.board, s.app, B_ZOMBIE, B_ZOMBIE_MAX,
+                           ZOMBIE_STRIDE, Z_DEAD, Z_HP, MAX_ZOMBIES);
     return s;
 }
 

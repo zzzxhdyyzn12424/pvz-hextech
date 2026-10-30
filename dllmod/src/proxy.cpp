@@ -42,15 +42,14 @@ DWORD WINAPI ProbeThread(LPVOID) {
         bool changed = !prev.valid
                        || s.board != prev.board
                        || s.sun != prev.sun
-                       || s.wave != prev.wave
                        || s.plants != prev.plants
                        || s.zombies != prev.zombies;
 
         if (changed) {
-            hx::Log("[t=%4d] app=%p board=%p scene=%d level=%d wave=%d/%d "
+            hx::Log("[t=%4d] app=%p board=%p scene=%d level=%d tick=%d "
                     "sun=%d plants=%d zombies=%d",
                     tick, (void*)s.app, (void*)s.board, s.scene, s.level,
-                    s.wave, s.wave_total, s.sun, s.plants, s.zombies);
+                    s.tick, s.sun, s.plants, s.zombies);
             prev = s;
             idle = 0;
         } else if (++idle == 30) {
