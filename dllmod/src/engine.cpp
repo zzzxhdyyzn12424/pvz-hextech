@@ -276,7 +276,14 @@ void Engine::ApplyPlantFrame(const Obj& p, ObjState& st) {
     }
     int want = (int)lround(st.shoot_base / mult);
     if (want < tune::P_SHOOT_INT_MIN) want = tune::P_SHOOT_INT_MIN;
-    if (cur != want) Wr<int>(a, want);
+    if (cur != want) {
+        Wr<int>(a, want);
+        if (!st.logged_shoot) {
+            st.logged_shoot = true;
+            Log("[hex] plant@%p type=%d 攻速 ×%.2f：射击间隔 %d -> %d",
+                (void*)p.addr, p.type, mult, st.shoot_base, want);
+        }
+    }
 }
 
 bool Engine::Lonely(const Obj& z) const {
@@ -318,13 +325,13 @@ void Engine::ApplyZombieFrame(const Obj& z, ObjState& st, bool baron) {
     int hp = RdFast<int>(a + Z_HP);
     if (hp < st.hp_prev) {
         st.hits++;
-        st.last_hit_frame = frame_;
+        st.last_hit_ms = now_ms_;
     }
     st.hp_prev = hp;
 
     // 护盾被打也算受伤（否则「脱战回盾」会变成每帧回满 = 无敌）
     int cur_shield = RdFast<int>(a + Z_SHIELD);
-    if (cur_shield < st.shield) st.last_hit_frame = frame_;
+    if (cur_shield < st.shield) st.last_hit_ms = now_ms_;
     st.shield = cur_shield;
     if (cur_shield > 0) stats_shield_++;
 
@@ -335,7 +342,7 @@ void Engine::ApplyZombieFrame(const Obj& z, ObjState& st, bool baron) {
             st.shield = st.shield_max;
             ApplyShield(a, st.shield, st.shield_max, false);
             Log("[hex] zombie@%p 山脉龙魂：护盾 %d", (void*)a, st.shield_max);
-        } else if (frame_ - st.last_hit_frame > tune::P_MOUNTAIN_REGEN) {
+        } else if (now_ms_ - st.last_hit_ms > tune::P_MOUNTAIN_REGEN_MS) {
             if (cur_shield < st.shield_max) {
                 Wr<int>(a + Z_SHIELD, st.shield_max);
                 st.shield = st.shield_max;
@@ -347,7 +354,8 @@ void Engine::ApplyZombieFrame(const Obj& z, ObjState& st, bool baron) {
     if (st.has(HEX_z_escape) && !st.fired.count("escape")) {
         if (hp > 0 && hp <= (int)(st.hp_max * tune::Z_ESCAPE_RATIO)) {
             st.fired.insert("escape");
-            st.escape_frame = frame_;
+            st.escape_ms = now_ms_;
+            st.escape_tick_ms = now_ms_;
             int sm = (int)(st.hp_max * tune::Z_ESCAPE_SHIELD);
             if (sm > st.shield_max) st.shield_max = sm;
             st.shield = st.shield_max;
@@ -359,10 +367,16 @@ void Engine::ApplyZombieFrame(const Obj& z, ObjState& st, bool baron) {
 
     // ---------- 逃跑计划：护盾 5 秒内衰减到 0 ----------
     if (st.fired.count("escape") && st.shield_max > 0) {
-        int dec = (int)(st.shield_max / (double)tune::kEscapeDecay + 0.5);
-        if (dec < 1) dec = 1;
+        // 按**真实流逝的毫秒**扣，不按调用次数 —— 这个 thunk 每秒被调多少次
+        // 并不固定（日志里 2 秒内跳 95~800 次），按次数扣会快好几倍。
+        // 用减法而不是「按剩余时间重算」，是为了让已经被打掉的护盾不回弹。
+        uint32_t dt = now_ms_ - st.escape_tick_ms;
+        if (dt > 100) dt = 100;          // 卡顿/暂停时别一次扣爆
+        st.escape_tick_ms = now_ms_;
+        int dec = (int)(st.shield_max * (double)dt
+                        / (double)tune::kEscapeDecayMs + 0.5);
         int cur = RdFast<int>(a + Z_SHIELD);
-        if (cur > 0) {
+        if (cur > 0 && dec > 0) {
             int nv = cur - dec;
             if (nv < 0) nv = 0;
             Wr<int>(a + Z_SHIELD, nv);
@@ -402,9 +416,9 @@ void Engine::ApplyZombieFrame(const Obj& z, ObjState& st, bool baron) {
     if (st.has(HEX_z_smallkiller)) bonus += tune::Z_SMALLKILLER_SPEED;
     if (baron)                     bonus += tune::Z_BARON_SPEED;   // 光环，含自己
     if (st.fired.count("escape")) {
-        uint32_t el = frame_ - st.escape_frame;
-        double left = (el >= tune::kEscapeDecay)
-                      ? 0.0 : 1.0 - (double)el / tune::kEscapeDecay;
+        uint32_t el = now_ms_ - st.escape_ms;
+        double left = (el >= tune::kEscapeDecayMs)
+                      ? 0.0 : 1.0 - (double)el / tune::kEscapeDecayMs;
         bonus += tune::Z_ESCAPE_SPEED * left;
     }
     if (bonus <= 0.0) {
@@ -430,10 +444,22 @@ void Engine::ApplyZombieFrame(const Obj& z, ObjState& st, bool baron) {
     st.prev_fx = nv;
     stats_speed_++;
     stats_nudge_ += add;
+    st.sum_own += own;
+    st.sum_add += add;
+    // 每 0.5 秒采一次快照给日志线程看，别每帧都动 vector
+    if (now_ms_ - last_spd_ms_ < 500 && spd_rows_.size() < 6) {
+        SpdRow r;
+        r.idx = z.idx;
+        r.bonus = bonus;
+        r.own = st.sum_own;
+        r.add = st.sum_add;
+        spd_rows_.push_back(r);
+    }
 }
 
 void Engine::Tick() {
     ++frame_;
+    now_ms_ = GetTickCount();
     Scan();
     EnsureHexes(plants_, plant_state_, Scope::Plant, "plant");
     EnsureHexes(zombies_, zombie_state_, Scope::Zombie, "zombie");
@@ -442,6 +468,10 @@ void Engine::Tick() {
     stats_speed_ = 0;
     stats_shield_ = 0;
     stats_nudge_ = 0.0;
+    if (now_ms_ - last_spd_ms_ >= 500) {
+        spd_rows_.clear();
+        last_spd_ms_ = now_ms_;
+    }
 
     // 男爵之手：场上只要有一只带这词条的僵尸，全体僵尸一起吃光环
     bool baron = false;

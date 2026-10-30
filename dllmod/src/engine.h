@@ -102,10 +102,16 @@ struct ObjState {
     // ---- 移速补位移 ----
     float prev_fx = 0.0f;            // 上一帧补完后的 +0x2C
     bool  fx_ok = false;
+    // 累计「游戏自己走了多少」/「我们补了多少」。
+    // 这两个数的比值就是实际倍率：ratio = (own+add)/own 应当等于 1+bonus。
+    // 这是唯一能证明「移速真的生效」的证据 —— 看 +0x34 字段是看不出来的。
+    double sum_own = 0.0;
+    double sum_add = 0.0;
 
     // ---- 攻速 ----
     int shoot_base = 0;              // 反推出的原版射击间隔
     int rage_hits = 0;               // 羊刀叠层
+    bool logged_shoot = false;       // 只在第一次写 +0x5C 时打日志
 
     // ---- 体型 ----
     int base_w = 0, base_h = 0;
@@ -114,9 +120,10 @@ struct ObjState {
     int shield = 0;
     int shield_max = 0;
 
-    // ---- 计时（单位：帧，100 帧 = 1 游戏秒）----
-    uint32_t escape_frame = 0;       // 逃跑计划触发帧
-    uint32_t last_hit_frame = 0;     // 上次掉血帧
+    // ---- 计时（真实毫秒，见 tuning.h 顶部为什么不用帧数）----
+    uint32_t escape_ms = 0;          // 逃跑计划触发时刻
+    uint32_t escape_tick_ms = 0;     // 护盾衰减的上次结算时刻
+    uint32_t last_hit_ms = 0;        // 上次掉血时刻
 
     bool has(HexId h) const {
         int i = gHexIdx[h];
@@ -139,6 +146,15 @@ public:
     int    speed_objs() const { return stats_speed_; }   // 本帧在补位移的对象数
     double nudge_px() const { return stats_nudge_; }     // 本帧补出去的像素
     int    shield_objs() const { return stats_shield_; } // 本帧带护盾的对象数
+
+    // 每帧重建的移速诊断（只给日志线程看，最多几条）
+    struct SpdRow {
+        int idx;
+        double bonus;
+        double own;     // 累计：游戏自己走了多少
+        double add;     // 累计：我们补了多少
+    };
+    const std::vector<SpdRow>& spd_rows() const { return spd_rows_; }
 
     // 调试：强制某条词条（对应 Python 的 HEX_FORCE）
     std::vector<std::string> force;
@@ -165,6 +181,9 @@ private:
     int stats_speed_ = 0;
     int stats_shield_ = 0;
     double stats_nudge_ = 0.0;
+    std::vector<SpdRow> spd_rows_;
+    uint32_t now_ms_ = 0;            // 本帧的 GetTickCount
+    uint32_t last_spd_ms_ = 0;       // 上次重建 spd_rows_ 的时刻
     uintptr_t last_board_ = 0;
     uint32_t frame_ = 0;
 };

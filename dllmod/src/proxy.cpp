@@ -57,9 +57,19 @@ DWORD WINAPI StatThread(LPVOID) {
             idle = 0;
             hx::Engine& e = hx::GetEngine();
             hx::Log("[stat] board=%p sun=%d plants=%d zombies=%d "
-                    "frame=%u speed=%d nudge=%.1fpx shield=%d",
+                    "frame=%u speed=%d nudge=%.2fpx shield=%d",
                     (void*)s.board, s.sun, s.plants, s.zombies, e.frame(),
                     e.speed_objs(), e.nudge_px(), e.shield_objs());
+            // 移速到底有没有生效，只能看这个比值：
+            //   ratio = (own + add) / own 应当 ≈ 1 + bonus
+            // 看 +0x34 字段是看不出来的（外置版踩过这个坑）。
+            for (const hx::Engine::SpdRow& r : e.spd_rows()) {
+                if (r.own <= 1.0) continue;          // 还没走够，比值没意义
+                hx::Log("[spd] idx=%d bonus=+%.0f%% own=%.0fpx add=%.0fpx "
+                        "ratio=%.2fx (期望 %.2fx)",
+                        r.idx, r.bonus * 100.0, r.own, r.add,
+                        (r.own + r.add) / r.own, 1.0 + r.bonus);
+            }
             prev = s;
         }
         Sleep(2000);

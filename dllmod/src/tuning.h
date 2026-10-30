@@ -12,10 +12,16 @@ namespace hx {
 namespace tune {
 
 // ---- 帧钟 ----
-// 游戏每秒 100 次 Board::Update（实测 Zombie+0x60 每秒 +100）。
-// 所以「秒」换算成帧就是 ×100。
-constexpr double kHz = 100.0;                       // Z_SPEED_HZ
-constexpr uint32_t kEscapeDecay = 5 * 100;          // Z_ESCAPE_DECAY = 5.0s
+// 时间基准用**真实毫秒**（GetTickCount），和外置版的 time.time() 一致。
+//
+// 为什么不数帧：我原本以为 Board::Update 每秒正好 100 次，可以拿自己的
+// 帧计数器当钟用。实测不成立 —— 同一段日志里两次采样之间的帧数在
+// 95~800 之间乱跳（说明 0x539D30 这个 thunk 并不是每次 Update 只调一次）。
+// 拿它当钟，「逃跑计划 5 秒衰减」会变成 1 秒、「山脉龙魂 3 秒回盾」会变成
+// 不到 1 秒，全是玩家能立刻感觉到的错。
+//
+// 移速补位移不受影响：那是按「游戏自己走了多少」按比例补的，调几次都对。
+constexpr uint32_t kEscapeDecayMs = 5000;           // Z_ESCAPE_DECAY = 5.0s
 
 // ---- 植物攻速（改 +0x5C 原生射击间隔，游戏自己多生成子弹）----
 constexpr double P_SWIFT_SPEED   = 0.25;            // P_SWIFT_SPEED
@@ -31,7 +37,7 @@ constexpr int    kShootNativeMax = 400;             // SHOOT_NATIVE_MAX
 constexpr int    P_TITAN_HP   = 2;                  // P_TITAN_HP（+200% = ×3）
 constexpr int    P_FISH_HP    = 80000;              // P_FISH_HP
 constexpr double P_MOUNTAIN_RATIO = 0.30;           // P_MOUNTAIN_RATIO
-constexpr uint32_t P_MOUNTAIN_REGEN = 3 * 100;      // P_MOUNTAIN_REGEN = 3.0s
+constexpr uint32_t P_MOUNTAIN_REGEN_MS = 3000;      // P_MOUNTAIN_REGEN = 3.0s
 
 // ---- 僵尸血量 / 护盾 ----
 constexpr double Z_GOLIATH_HP = 1.00;               // Z_GOLIATH_HP（+100% = ×2）
