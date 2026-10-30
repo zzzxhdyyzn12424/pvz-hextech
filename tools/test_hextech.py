@@ -817,6 +817,21 @@ def t_probe_shoot():
     _, w120 = simulate(120, 1200)
     check("间隔 150 -> 120 后开火变多", w120 > w150, True)
 
+    # audit 命令：一屏看清每株是原生还是被改过（上机确认「大腕生效没」用）
+    import contextlib
+    import io as _io
+    g = MockGame()
+    add_plant(g, 0, 2, 3, 300)                  # 豌豆射手，被大腕降过速
+    g.mem[P_ADDR + C.P_SHOOT_INTERVAL] = 1200
+    add_plant(g, 0, 2, 4, 300, addr=P2_ADDR)    # 豌豆射手，原生
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        PS.cmd_audit(g)
+    out = buf.getvalue()
+    check("audit：认出降速 ×8.0", "已降速 ×8.0" in out, True)
+    check("audit：认出原生", "原生" in out, True)
+    check("audit：报出 12.00 秒/发", "12.00" in out, True)
+
 
 def t_new_hexes_v16():
     print("\n[9] v1.6 新增词条（植物 6 + 僵尸 5）")
@@ -840,7 +855,7 @@ def t_new_hexes_v16():
     for _ in range(5):
         damage_zombie(g, 20)
         step(g, eng, 2)
-    check("大腕：5 次共 200 伤害", zombie_lost(g, 1000), 200)
+    check("大腕：5 次共 600 伤害（单发 ×6）", zombie_lost(g, 1000), 600)
 
     g, eng = setup(z_x=300, p_hexes=("p_bigpea",))
     x0 = g.i32(Z_ADDR + C.O_X)
@@ -1095,6 +1110,52 @@ def t_new_hexes_v16():
     check("僵尸新词条都能抽到", len(want_z & seen), 7)
 
 
+def t_shoot_base_recover():
+    """v1.6.5：攻速倍率不能跨「启动器重启」累乘。
+
+    场景：启动器关掉重开，游戏进程还在跑，植物的 +0x5C 里已经是我们
+    上一轮写进去的值。新 Engine 如果直接把它当原版值，就会再乘一次倍率。
+    往大偏 = 大腕彻底不射；往小偏 = 那一行无敌。两个方向都得堵。
+    """
+    print("\n[10] 攻速倍率不跨重启累乘（v1.6.5）")
+
+    def reboot(preset, mem_interval, times=1):
+        """模拟 times 次「启动器关掉重开」。返回最终的 +0x5C。"""
+        g = MockGame()
+        add_plant(g, 0, 0, 0, 300)
+        g.mem[P_ADDR + C.P_SHOOT_INTERVAL] = mem_interval
+        for _ in range(times):
+            eng = C.Engine(g, seed=1, preset={
+                ("plant", P_ADDR): list(preset), ("zombie", Z_ADDR): []})
+            eng.last_tick = 0.0
+            step(g, eng, 2)
+        return g.i32(P_ADDR + C.P_SHOOT_INTERVAL)
+
+    # 大腕：上一轮已经写成 1200，重启后不能变 9600
+    check("大腕：重启后仍是 1200（不是 9600）",
+          reboot(("p_bigpea",), 1200), 1200)
+    check("大腕：连开 3 次不漂移",
+          reboot(("p_bigpea",), 1200, times=3), 1200)
+
+    # 灵巧：上一轮写成 120，重启后不能滚成 96
+    check("灵巧：重启后仍是 120（不是 96）",
+          reboot(("p_swift",), 120), 120)
+    check("灵巧：连开 3 次不漂移",
+          reboot(("p_swift",), 120, times=3), 120)
+
+    # 大腕 + 灵巧：1200/1.25 = 960
+    check("大腕+灵巧：重启后仍是 960",
+          reboot(("p_bigpea", "p_swift"), 960), 960)
+
+    # 已经偏过两轮的（旧版本留下的 600）：按 150/300 就近吸附回 150 → 1200
+    check("旧版本残留 600 能修回 1200",
+          reboot(("p_bigpea",), 600), 1200)
+
+    # 原生值本身不该被误判
+    check("原生 150 不被误改", reboot(("p_bigpea",), 150), 1200)
+    check("投手原生 300 按 ×8 算", reboot(("p_bigpea",), 300), 2400)
+
+
 def main():
     t_rules()
     t_damage_boost()
@@ -1106,6 +1167,7 @@ def main():
     t_new_hexes()
     t_probe_shoot()
     t_new_hexes_v16()
+    t_shoot_base_recover()
 
     print("\n" + "=" * 52)
     if FAILED:

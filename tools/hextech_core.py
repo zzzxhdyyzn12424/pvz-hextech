@@ -243,8 +243,8 @@ HEX_DEFS = [
 
     # ---------------- 植物 v1.6 新增 ----------------
     dict(id="p_bigpea", name="大腕", short="腕", tier=SILVER, scope="plant",
-         apply="output", impl=True, need="攻速 ×0.125、伤害 ×2、命中整格击退",
-         desc="攻速降低 87.5%，但射出的豌豆伤害翻倍，并把命中的那一格的所有僵尸击退一格。"),
+         apply="output", impl=True, need="攻速 ×0.125、伤害 ×6、命中整格击退",
+         desc="攻速降低 87.5%，但射出的豌豆伤害 6 倍，并把命中的那一格的所有僵尸击退一格。"),
     dict(id="p_bloodsword", name="花晓之剑", short="剑", tier=SILVER, scope="plant",
          apply="output", impl=True,
          desc="对僵尸造成伤害时，回复自身已损失生命值。"),
@@ -717,6 +717,11 @@ class Engine:
     P_RAGEBLADE_PER_HIT = 0.01  # 羊刀：每次命中 +1% 攻速（缩短射击间隔）
     P_RAGEBLADE_CAP = 1.00      # 羊刀：攻速加成上限 +100%
     P_SHOOT_INTERVAL_MIN = 1    # 射击间隔下限（帧），防止写出 0 导致每帧开火
+    # 原版射击间隔的合理区间（帧）。原版会射击的植物只有两档：
+    # 150（豌豆 / 蘑菇 / 仙人掌 / 杨桃 / 香蒲 / 机枪）和 300（投手类）。
+    # 落在 [140, 400] 之外的读数，一定是 mod 自己写进去的，见 _native_shoot_base。
+    SHOOT_NATIVE_MIN = 140
+    SHOOT_NATIVE_MAX = 400
     P_CHILL_EXTRA = 0.30        # 冰寒：在原生减速之上再压 30% 移速
     P_CHILL_TIME = 3.0          # 冰寒：强化减速持续 3 秒
     P_ZEALOT_DOUBLE = 0.25      # 狂热者：双倍伤害概率
@@ -794,7 +799,7 @@ class Engine:
 
     # ---- v1.6 新增植物词条 ----
     P_BIGPEA_SLOW = 0.875       # 大腕：攻速 -87.5% → 射击间隔 ×1/(1-0.875) = ×8
-    P_BIGPEA_DMG = 1.00         # 大腕：伤害 +100%（= ×2）
+    P_BIGPEA_DMG = 5.00         # 大腕：伤害 +500%（= ×6，v1.6.4 的 ×2 再 ×3）
     P_BIGPEA_KNOCK = 80         # 大腕：命中击退距离（一格 = 80px，往右推）
     # 大腕的「那一格」用的是草坪真实网格：第 0 格左沿 40px，每格宽 80px。
     # 设计原文是「把命中的那一格的僵尸击退一格」，不是只推挨打的那一只。
@@ -1109,12 +1114,40 @@ class Engine:
             cur = self.g.i32(addr)
             if cur is None or not (1 < cur < 100000):
                 return
-            st.shoot_base = cur
+            st.shoot_base = self._native_shoot_base(cur, mult)
         want = max(self.P_SHOOT_INTERVAL_MIN,
                    int(round(st.shoot_base / mult)))
         cur = self.g.i32(addr)
         if cur != want:
             self.g.write_i32(addr, want)
+
+    def _native_shoot_base(self, cur, mult):
+        """从 +0x5C 的当前读数反推「原版间隔」，把倍率一层层剥掉。
+
+        ★ 为什么必须做这一步（v1.6.5 修的 bug）：
+        启动器关掉重开时**游戏进程还在跑**，那些已经被我们改过 +0x5C 的植物，
+        会把「改后的值」当成原版值读进来，于是再乘一次倍率：
+
+            大腕   150 →(×8) 1200 →(再×8) 9600 → 96 秒一发
+            灵巧   150 →(÷1.25) 120 →(再÷1.25) 96 → 76 → 61 ……
+
+        每重启一次启动器就偏一次。往大偏是「大腕不射了」，往小偏是
+        「那一行无敌」——正是最危险的方向。
+
+        原版只有 150 / 300 两档间隔，所以落在 [SHOOT_NATIVE_MIN, SHOOT_NATIVE_MAX]
+        之外的读数一定是 mod 写的，用 `cur × mult` 就能精确还原（我们写进去的
+        就是 `base / mult`）。多剥几层是为了兼容「已经偏了好几次」的存档。
+        """
+        guess = float(cur)
+        for _ in range(4):          # 最多剥 4 层，避免死循环
+            if self.SHOOT_NATIVE_MIN <= guess <= self.SHOOT_NATIVE_MAX:
+                return int(round(guess))
+            if mult <= 0:
+                break
+            guess *= mult
+        # 剥不出来（比如跨版本改过倍率，旧值 600 用新倍率剥会落到 75）：
+        # 按原版那两档 150 / 300 就近吸附，比夹到区间边界更接近真值。
+        return 150 if guess < 225 else 300
 
     def _titan_charge(self, p, st):
         """泰坦巨人：种植时额外消耗 100% 阳光。

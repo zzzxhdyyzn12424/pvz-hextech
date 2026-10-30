@@ -28,9 +28,14 @@ probe_shoot.py —— 验证「植物攻速 = 真的多射豌豆」
         结束时自动还原。期望从 ~0.67 提升到 ~0.83（+25%）。
 
     python tools/probe_shoot.py slow 24
-        验证反方向：带【大腕】的植物 +0x5C 应该是 600（150×4）。
+        验证反方向：带【大腕】的植物 +0x5C 应该是 1200（150×8）。
         观测 24 秒，报告每次开火后 +0x58 被重置成的值、以及两次开火的
-        实际间隔。期望：重置值 ≈ 600、间隔 ≈ 20 秒、是原版的 4 倍。
+        实际间隔。期望：重置值 ≈ 1200、间隔 ≈ 12 秒、是原版的 8 倍。
+
+    python tools/probe_shoot.py audit
+        ★ 一屏看清「攻速词条到底生效了没」：列出场上每一株植物的
+        +0x5C、折算成几秒一发、以及判定（原生 / 已降速 ×N / 已提速 ×N）。
+        大腕生效的话，那一株应该显示「已降速 ×8.0」。
 
 注意：PVZ 失焦/最小化会自动暂停，观测期间必须让游戏窗口保持前台。
 """
@@ -255,6 +260,62 @@ def cmd_slow(game, seconds):
         print("场上没有同时存在「带大腕」和「原版」的植物，只能看表格单行。")
 
 
+def cmd_audit(game):
+    """一屏看清每株植物的攻速状态：+0x5C 是多少、折算几秒、生效没生效。
+
+    判定依据是原版只有 150 / 300 两档间隔（见 hextech_core.SHOOT_NATIVE_MIN）：
+        间隔 > 400  → 被降速（大腕），倍数 = 间隔 / 150
+        间隔 < 140  → 被提速（灵巧 / 狂热者 / 羊刀），倍数 = 150 / 间隔
+        其余        → 原生，没被改过
+    """
+    ps = find_shooters(game)
+    if not ps:
+        print("没找到会射击的植物。先进关卡种一株豌豆射手。")
+        return
+    print("%-6s %-10s %-4s %-4s %-10s %-10s %s" %
+          ("类型", "名字", "行", "列", "间隔+0x5C", "秒/发", "判定"))
+    print("-" * 66)
+    slowed = []
+    speeded = []
+    for p in sorted(ps, key=lambda x: (x["row"], x["col"])):
+        itv = p["interval"]
+        secs = itv / float(C.Engine.Z_SPEED_HZ)
+        if itv > C.Engine.SHOOT_NATIVE_MAX:
+            verdict = "已降速 ×%.1f" % (itv / 150.0)
+            slowed.append((p, itv))
+        elif itv < C.Engine.SHOOT_NATIVE_MIN:
+            verdict = "已提速 ×%.2f" % (150.0 / itv)
+            speeded.append((p, itv))
+        else:
+            verdict = "原生"
+        print("%-6d %-10s %-4d %-4d %-10d %-10.2f %s" % (
+            p["type"], C.PLANT_NAMES.get(p["type"], "?"),
+            p["row"], p["col"], itv, secs, verdict))
+
+    print()
+    if slowed:
+        p, itv = max(slowed, key=lambda x: x[1])
+        print("[结论] %d 株被降速，最大间隔 %d 帧（%.1f 秒/发）= 原版的 %.1f 倍。"
+              % (len(slowed), itv, itv / float(C.Engine.Z_SPEED_HZ), itv / 150.0))
+        print("       大腕 12 秒一发时，这个数应该是 1200（×8.0）。")
+    else:
+        print("[结论] 场上没有被降速的植物。如果这行有种大腕，说明词条没生效。")
+
+    if speeded:
+        p, itv = min(speeded, key=lambda x: x[1])
+        print("       另有 %d 株被提速，最快 %d 帧（%.2f 秒/发）。"
+              % (len(speeded), itv, itv / float(C.Engine.Z_SPEED_HZ)))
+
+    # 同一株被反复重启启动器改过的痕迹：间隔不是 150 的整数倍
+    odd = [p for p, itv in slowed if abs(itv / 150.0 - round(itv / 150.0)) > 0.08]
+    if odd:
+        print()
+        print("[注意] 有 %d 株的间隔不是 150 的整数倍（%s），"
+              % (len(odd), "、".join(str(p["interval"]) for p in odd)))
+        print("       通常意味着跨版本改过倍率。v1.6.5 起会自己剥回原值，")
+        print("       关掉启动器重开一次即可修正。")
+
+
 def main(argv):
     if not argv:
         print(__doc__)
@@ -279,6 +340,8 @@ def main(argv):
             cmd_test(game, float(argv[1]) if len(argv) > 1 else 12.0)
         elif cmd == "slow":
             cmd_slow(game, float(argv[1]) if len(argv) > 1 else 24.0)
+        elif cmd == "audit":
+            cmd_audit(game)
         else:
             print("未知命令：%s" % cmd)
             print(__doc__)
