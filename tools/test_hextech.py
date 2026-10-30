@@ -834,7 +834,7 @@ def t_new_hexes_v16():
     # ---- 大腕 ----
     g, eng = setup(p_hexes=("p_bigpea",))
     step(g, eng, 3)
-    check("大腕：射击间隔 150 → 600", g.i32(P_ADDR + C.P_SHOOT_INTERVAL), 600)
+    check("大腕：射击间隔 150 → 1200", g.i32(P_ADDR + C.P_SHOOT_INTERVAL), 1200)
 
     g, eng = setup(p_hexes=("p_bigpea",))
     for _ in range(5):

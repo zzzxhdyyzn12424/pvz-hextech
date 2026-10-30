@@ -243,8 +243,8 @@ HEX_DEFS = [
 
     # ---------------- 植物 v1.6 新增 ----------------
     dict(id="p_bigpea", name="大腕", short="腕", tier=SILVER, scope="plant",
-         apply="output", impl=True, need="攻速 ×0.25、伤害 ×2、命中整格击退",
-         desc="攻速降低 75%，但射出的豌豆伤害翻倍，并把命中的那一格的所有僵尸击退一格。"),
+         apply="output", impl=True, need="攻速 ×0.125、伤害 ×2、命中整格击退",
+         desc="攻速降低 87.5%，但射出的豌豆伤害翻倍，并把命中的那一格的所有僵尸击退一格。"),
     dict(id="p_bloodsword", name="花晓之剑", short="剑", tier=SILVER, scope="plant",
          apply="output", impl=True,
          desc="对僵尸造成伤害时，回复自身已损失生命值。"),
@@ -793,7 +793,7 @@ class Engine:
     Z_PORCUPINE = 0.20          # 豪猪：反弹 20% 所受伤害
 
     # ---- v1.6 新增植物词条 ----
-    P_BIGPEA_SLOW = 0.75        # 大腕：攻速 -75% → 射击间隔 ×1/(1-0.75) = ×4
+    P_BIGPEA_SLOW = 0.875       # 大腕：攻速 -87.5% → 射击间隔 ×1/(1-0.875) = ×8
     P_BIGPEA_DMG = 1.00         # 大腕：伤害 +100%（= ×2）
     P_BIGPEA_KNOCK = 80         # 大腕：命中击退距离（一格 = 80px，往右推）
     # 大腕的「那一格」用的是草坪真实网格：第 0 格左沿 40px，每格宽 80px。
@@ -1098,7 +1098,7 @@ class Engine:
         if st.has("p_rageblade"):
             mult += min(st.rage_hits * self.P_RAGEBLADE_PER_HIT,
                         self.P_RAGEBLADE_CAP)
-        # 大腕：攻速 -75% → 间隔 ×4（mult 可以小于 1，这里不再提前 return）
+        # 大腕：攻速 -87.5% → 间隔 ×8（mult 可以小于 1，这里不再提前 return）
         if st.has("p_bigpea"):
             mult *= (1.0 - self.P_BIGPEA_SLOW)
         if abs(mult - 1.0) <= 1e-6:
