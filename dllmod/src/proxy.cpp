@@ -20,6 +20,10 @@ namespace {
 // 里程碑 1 的目标只有一个：证明代码真的在游戏进程里跑起来了。
 // 做法是每秒抓一次场景快照，只在「有变化」时写日志，避免刷屏。
 DWORD WINAPI ProbeThread(LPVOID) {
+    // 先睡一下再干活：DllMain 是在加载器锁里跑的，新线程如果立刻调 CRT/文件 API，
+    // 可能撞上还没初始化完的状态。500ms 足够加载器收尾。
+    Sleep(500);
+
     hx::LogReset();
     hx::Log("=== hextech in-process (milestone 1) ===");
     hx::Log("module base = %p", (void*)GetModuleHandleA("wsock32.dll"));

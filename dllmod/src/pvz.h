@@ -57,28 +57,42 @@ constexpr uint32_t Z_SHIELD = 0xDC;
 constexpr uint32_t Z_DEAD   = 0xEC;
 
 // ---- 安全访问 ----
-// 进程内解引用最怕空指针和野指针。游戏对象都是堆上的，
-// 地址一定落在用户态低 2G 且 4 字节对齐，这里做个下限检查挡掉明显垃圾。
+// 进程内解引用最怕野指针。只做「地址范围」检查是不够的：
+// 一个垃圾指针只要落在 0x10000..0x7FFF0000 里就会过检，然后解引用直接崩游戏。
+// 必须问操作系统「这一页到底是不是可读的已提交内存」——VirtualQuery 干这个。
+//
+// 外置版没这个问题：ReadProcessMemory 读不到就返回失败，天然安全。
+// 进程内没有这层保护，得自己补上。**这是进程内方案最容易踩的坑。**
 inline bool Plausible(uintptr_t p) {
     return p >= 0x10000 && p < 0x7FFF0000;
 }
 
+inline bool Readable(uintptr_t p, size_t n) {
+    if (!Plausible(p)) return false;
+    if (p + n < p) return false;                    // 溢出
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
+    if (mbi.State != MEM_COMMIT) return false;
+    if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return false;
+    uintptr_t region_end = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+    return (p + n) <= region_end;
+}
+
 template <typename T>
 inline T Rd(uintptr_t p) {
-    if (!Plausible(p)) return T(0);
+    if (!Readable(p, sizeof(T))) return T(0);
     return *reinterpret_cast<T*>(p);
 }
 
 template <typename T>
 inline bool Wr(uintptr_t p, T v) {
-    if (!Plausible(p)) return false;
+    if (!Readable(p, sizeof(T))) return false;
     *reinterpret_cast<T*>(p) = v;
     return true;
 }
 
 // 安全读一个指针字段（返回 0 表示读不到）
 inline uintptr_t Ptr(uintptr_t base, uint32_t off) {
-    if (!Plausible(base)) return 0;
     uintptr_t v = Rd<uint32_t>(base + off);
     return Plausible(v) ? v : 0;
 }
