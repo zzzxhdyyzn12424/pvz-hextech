@@ -41,6 +41,7 @@ DWORD WINAPI StatThread(LPVOID) {
     }
 
     hx::Snapshot prev;
+    int idle = 0;
     for (int i = 0; i < 7200; ++i) {          // 约 4 小时
         if (!hooked) hx::GetEngine().Tick();  // 兜底驱动
 
@@ -50,9 +51,15 @@ DWORD WINAPI StatThread(LPVOID) {
                        || s.sun != prev.sun
                        || s.plants != prev.plants
                        || s.zombies != prev.zombies;
-        if (changed) {
-            hx::Log("[stat] board=%p sun=%d plants=%d zombies=%d", (void*)s.board,
-                    s.sun, s.plants, s.zombies);
+        // 就算什么都没变，也每 16 秒打一行 —— 否则「移速到底补没补出去」
+        // 这种问题在日志里完全看不到（数量不变，但 nudge 一直在动）。
+        if (changed || ++idle >= 8) {
+            idle = 0;
+            hx::Engine& e = hx::GetEngine();
+            hx::Log("[stat] board=%p sun=%d plants=%d zombies=%d "
+                    "frame=%u speed=%d nudge=%.1fpx shield=%d",
+                    (void*)s.board, s.sun, s.plants, s.zombies, e.frame(),
+                    e.speed_objs(), e.nudge_px(), e.shield_objs());
             prev = s;
         }
         Sleep(2000);

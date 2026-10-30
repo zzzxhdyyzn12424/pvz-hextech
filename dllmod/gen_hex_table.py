@@ -35,7 +35,22 @@ def main():
     lines.append("")
     lines.append("namespace hx {")
     lines.append("")
-    lines.append("const HexDef kHexDefs[] = {")
+    # ---- 枚举：把每条词条编成一个编译期常量 ----
+    # 为什么要这个：引擎每帧要对每个对象问十几次「你有没有某条词条」。
+    # 用字符串问就要 48 次 strcmp，100Hz × 几十个对象 = 每秒几十万次，
+    # 全花在比较字符串上。编成 int 之后 has() 只是在 1~3 个整数里找一下。
+    lines.append("enum HexId : int {")
+    for i, d in enumerate(C.HEX_DEFS):
+        lines.append("    HEX_%s = %d," % (d["id"], i))
+    lines.append("    HEX_COUNT")
+    lines.append("};")
+    lines.append("")
+    lines.append("inline const char* const kHexIdNames[] = {")
+    for d in C.HEX_DEFS:
+        lines.append("    %s," % cstr(d["id"]))
+    lines.append("};")
+    lines.append("")
+    lines.append("inline const HexDef kHexDefs[] = {")
     for d in C.HEX_DEFS:
         lines.append("    { %s, %s, %s, %s, %s, %s }," % (
             cstr(d["id"]), cstr(d["name"]), cstr(d["short"]),
@@ -45,7 +60,22 @@ def main():
         ))
     lines.append("};")
     lines.append("")
-    lines.append("const int kHexDefCount = %d;" % len(C.HEX_DEFS))
+    lines.append("inline const int kHexDefCount = %d;" % len(C.HEX_DEFS))
+    lines.append("")
+
+    # ---- 互斥组 ----
+    # 同一只僵尸身上不能同时出现组内两条。最要紧的是移速那组：
+    # 移速是加法叠加的，四条一起吃就是 ×6 以上，僵尸直接飞过去。
+    groups = getattr(C, "EXCLUSIVE_GROUPS", [])
+    width = max([len(g) for g in groups] + [1])
+    lines.append("constexpr int kExclWidth = %d;" % width)
+    lines.append("inline const int kExclGroups[][kExclWidth] = {")
+    for g in groups:
+        ids = ["HEX_" + x for x in sorted(g)]
+        ids += ["-1"] * (width - len(ids))
+        lines.append("    { %s }," % ", ".join(ids))
+    lines.append("};")
+    lines.append("inline const int kExclGroupCount = %d;" % len(groups))
     lines.append("")
     lines.append("}  // namespace hx")
 

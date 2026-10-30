@@ -47,6 +47,9 @@ constexpr uint32_t O_X = 0x08;
 constexpr uint32_t O_Y = 0x0C;
 constexpr uint32_t O_W = 0x10;
 constexpr uint32_t O_H = 0x14;
+// 真实坐标（float）。+0x08 的 int 版每帧由它取整同步。
+// 移速加成必须写这个字段 —— 详见 tuning.h 顶部和 engine.cpp 里的说明。
+constexpr uint32_t O_FX = 0x2C;
 
 // ---- Plant ----
 constexpr uint32_t P_ROW      = 0x1C;
@@ -61,11 +64,15 @@ constexpr uint32_t P_SHOOT_INT = 0x5C;
 // ---- Zombie ----
 constexpr uint32_t Z_TYPE   = 0x24;
 constexpr uint32_t Z_STATUS = 0x28;
+constexpr uint32_t Z_SPEED  = 0x34;   // float 每帧位移量。**不要直接写**，见 tuning.h
 constexpr uint32_t Z_HP     = 0xC8;
 constexpr uint32_t Z_HELMET = 0xD0;
-constexpr uint32_t Z_SHIELD_TYPE = 0xD8;
+constexpr uint32_t Z_HELMET_MAX = 0xD4;
+constexpr uint32_t Z_SHIELD_TYPE = 0xD8;   // 0 = 没有盾；1 铁门 / 2 梯子 / 3 报纸
 constexpr uint32_t Z_SHIELD = 0xDC;
+constexpr uint32_t Z_SHIELD_MAX = 0xE0;
 constexpr uint32_t Z_DEAD   = 0xEC;
+constexpr uint32_t Z_ANIM_RATE = 0x11C;    // float 动画速率（被冰冻时 < 1，不是移速）
 
 // ---- 安全访问 ----
 // 进程内解引用最怕野指针。只做「地址范围」检查是不够的：

@@ -4,7 +4,9 @@
 //  对应外置版的 Engine（tools/hextech_core.py）。差别：
 //    · 没有 ReadProcessMemory，全部直接解引用
 //    · 没有 overlay / tkinter，UI 以后用游戏自己的绘制
-//    · 每帧由我们自己的线程驱动（M4 再改成挂进游戏 Update）
+//    · 每帧由游戏自己的 Board::Update 驱动（M4 已挂钩）
+//    · 时间基准改成「帧计数」：游戏每秒 100 次 Update，比 time.time() 稳，
+//      而且游戏暂停时 Update 不跑，帧钟跟着停 —— 正好是我们想要的语义
 // ============================================================================
 #pragma once
 
@@ -17,8 +19,58 @@
 #include <vector>
 
 #include "hex.h"
+#include "hex_table.gen.h"   // HexId 枚举（自动生成）
 
 namespace hx {
+
+// 词条 id -> kHexDefs 下标。Init 时填一次，之后 O(1)。
+extern int gHexIdx[HEX_COUNT];
+
+// 两条词条是否互斥（同一对象不能同时拥有）
+inline bool HexConflict(int a, int b) {
+    for (int g = 0; g < kExclGroupCount; ++g) {
+        bool ha = false, hb = false;
+        for (int k = 0; k < kExclWidth; ++k) {
+            int v = kExclGroups[g][k];
+            if (v < 0) break;
+            if (v == a) ha = true;
+            if (v == b) hb = true;
+        }
+        if (ha && hb) return true;
+    }
+    return false;
+}
+
+// 抽卡（带互斥组过滤）。
+// hex.h 里的 RollHexes 只管「从池子里不重复地抽」，它看不到互斥表
+// （互斥表在自动生成的头里，而那个头又 include 了 hex.h，只能绕开）。
+// 所以在这里再包一层：抽到和已选的冲突就换一条。
+inline std::vector<int> RollHexesEx(Scope scope, int plant_type, std::mt19937& rng) {
+    std::uniform_int_distribution<int> pick_count(kHexMin, kHexMax);
+    int count = pick_count(rng);
+
+    std::vector<int> pool = PoolFor(scope, plant_type, false);
+    std::uniform_real_distribution<double> uni(0.0, 1.0);
+    if (uni(rng) < kPrismaticChance) {
+        std::vector<int> extra = PoolFor(scope, plant_type, true);
+        pool.insert(pool.end(), extra.begin(), extra.end());
+    }
+
+    std::vector<int> out;
+    for (int k = 0; k < count && !pool.empty(); ++k) {
+        std::uniform_int_distribution<size_t> pick(0, pool.size() - 1);
+        size_t i = pick(rng);
+        int cand = pool[i];
+        pool.erase(pool.begin() + (ptrdiff_t)i);
+        bool bad = false;
+        for (int picked : out) {
+            if (HexConflict(picked, cand)) { bad = true; break; }
+        }
+        if (bad) { --k; continue; }
+        out.push_back(cand);
+    }
+    return out;
+}
 
 // 一个对象（植物或僵尸）本帧的快照
 struct Obj {
@@ -26,19 +78,48 @@ struct Obj {
     int idx = 0;
     int type = 0;
     int hp = 0;
-    int hp_max = 0;
+    int hp_max = 0;     // 植物读真实 +0x44；僵尸没有这个字段，用出生血量
     int row = 0;
     int col = 0;
     int x = 0;
     int y = 0;
 };
 
-// 每个对象挂的词条状态
+// 每个对象挂的词条状态 + 每帧记账
+//
+// 「记账」这部分是和外置版对齐的关键：外置版靠 ReadProcessMemory 每帧采样，
+// 进程内一样要采样，只是少了系统调用。下面这些字段全部是「上一帧的读数」，
+// 用来在没有伤害钩子的情况下推断「这一帧发生了什么」。
 struct ObjState {
     std::vector<int> hexes;          // 词条下标
     std::set<std::string> fired;     // 一次性效果是否已触发
-    bool has(const char* id) const {
-        int i = HexIndex(id);
+
+    // ---- 血量记账 ----
+    int hp_max = 1;                  // 出生时血量（僵尸没有 max 字段，就取它）
+    int hp_prev = 0;                 // 上一帧血量，用来判断「这一帧掉血了」
+    int hits = 0;                    // 累计挨打次数
+
+    // ---- 移速补位移 ----
+    float prev_fx = 0.0f;            // 上一帧补完后的 +0x2C
+    bool  fx_ok = false;
+
+    // ---- 攻速 ----
+    int shoot_base = 0;              // 反推出的原版射击间隔
+    int rage_hits = 0;               // 羊刀叠层
+
+    // ---- 体型 ----
+    int base_w = 0, base_h = 0;
+
+    // ---- 护盾（借用僵尸原生护盾槽 +0xD8/+0xDC/+0xE0）----
+    int shield = 0;
+    int shield_max = 0;
+
+    // ---- 计时（单位：帧，100 帧 = 1 游戏秒）----
+    uint32_t escape_frame = 0;       // 逃跑计划触发帧
+    uint32_t last_hit_frame = 0;     // 上次掉血帧
+
+    bool has(HexId h) const {
+        int i = gHexIdx[h];
         return i >= 0 && std::find(hexes.begin(), hexes.end(), i) != hexes.end();
     }
 };
@@ -47,11 +128,17 @@ class Engine {
 public:
     void Init(unsigned seed);
 
-    // 每帧调用。返回本帧是否有新对象拿到词条（用于日志）
+    // 每帧调用（游戏 Board::Update 开头）
     void Tick();
 
     int plant_count() const { return stats_plant_; }
     int zombie_count() const { return stats_zombie_; }
+    uint32_t frame() const { return frame_; }
+
+    // 本帧诊断（每帧清零，供低频日志采样）
+    int    speed_objs() const { return stats_speed_; }   // 本帧在补位移的对象数
+    double nudge_px() const { return stats_nudge_; }     // 本帧补出去的像素
+    int    shield_objs() const { return stats_shield_; } // 本帧带护盾的对象数
 
     // 调试：强制某条词条（对应 Python 的 HEX_FORCE）
     std::vector<std::string> force;
@@ -63,6 +150,11 @@ private:
                      Scope scope, const char* kind);
     void ApplyOnSpawn(const Obj& o, ObjState& st, const char* kind);
 
+    // 每帧重算类
+    void ApplyPlantFrame(const Obj& p, ObjState& st);
+    void ApplyZombieFrame(const Obj& z, ObjState& st, bool baron);
+    bool Lonely(const Obj& z) const;
+
     std::mt19937 rng_;
     std::map<uintptr_t, ObjState> plant_state_;
     std::map<uintptr_t, ObjState> zombie_state_;
@@ -70,7 +162,11 @@ private:
     std::vector<Obj> zombies_;
     int stats_plant_ = 0;
     int stats_zombie_ = 0;
+    int stats_speed_ = 0;
+    int stats_shield_ = 0;
+    double stats_nudge_ = 0.0;
     uintptr_t last_board_ = 0;
+    uint32_t frame_ = 0;
 };
 
 // 全局单例，proxy.cpp 直接用
