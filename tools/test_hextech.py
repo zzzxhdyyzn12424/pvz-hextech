@@ -24,6 +24,7 @@ P_ADDR = 0x300000
 P2_ADDR = 0x300000 + C.PLANT_STRIDE
 Z_ADDR = 0x400000
 Z2_ADDR = 0x400000 + C.ZOMBIE_STRIDE
+Z3_ADDR = 0x400000 + 2 * C.ZOMBIE_STRIDE
 
 FAILED = []
 PASSED = 0
@@ -846,6 +847,27 @@ def t_new_hexes_v16():
     damage_zombie(g, 20)
     step(g, eng, 2)
     check("大腕：命中击退 80px", g.i32(Z_ADDR + C.O_X) - x0, 80)
+
+    # 整格击退：第 3 格 [280,360) 里两只都推，第 4 格 [360,440) 那只不动
+    g = MockGame()
+    add_plant(g, 0, 0, 0, 300)
+    add_zombie(g, 1000, 300, 80)                    # 第 3 格 ← 被命中
+    add_zombie(g, 1000, 340, 80, addr=Z2_ADDR)      # 第 3 格 ← 同格
+    add_zombie(g, 1000, 420, 80, addr=Z3_ADDR)      # 第 4 格 ← 隔壁
+    eng = C.Engine(g, seed=1, preset={
+        ("plant", P_ADDR): ["p_bigpea"],
+        ("zombie", Z_ADDR): [], ("zombie", Z2_ADDR): [],
+        ("zombie", Z3_ADDR): []})
+    eng.last_tick = 0.0
+    step(g, eng, 2)
+    b1 = g.i32(Z_ADDR + C.O_X)
+    b2 = g.i32(Z2_ADDR + C.O_X)
+    b3 = g.i32(Z3_ADDR + C.O_X)
+    damage_zombie(g, 20)
+    step(g, eng, 2)
+    check("大腕：同格另一只也被推 80", g.i32(Z2_ADDR + C.O_X) - b2, 80)
+    check("大腕：隔壁格的不动", g.i32(Z3_ADDR + C.O_X) - b3, 0)
+    check("大腕：被命中的那只也推了", g.i32(Z_ADDR + C.O_X) - b1, 80)
 
     # ---- 花晓之剑 ----
     g, eng = setup(plant_hp=300, p_hexes=("p_bloodsword",))

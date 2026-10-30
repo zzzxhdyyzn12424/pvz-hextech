@@ -243,8 +243,8 @@ HEX_DEFS = [
 
     # ---------------- 植物 v1.6 新增 ----------------
     dict(id="p_bigpea", name="大腕", short="腕", tier=SILVER, scope="plant",
-         apply="output", impl=True, need="攻速 ×0.25、伤害 ×2、命中击退一格",
-         desc="攻速降低 75%，但射出的豌豆伤害翻倍，并把命中的僵尸击退一格。"),
+         apply="output", impl=True, need="攻速 ×0.25、伤害 ×2、命中整格击退",
+         desc="攻速降低 75%，但射出的豌豆伤害翻倍，并把命中的那一格的所有僵尸击退一格。"),
     dict(id="p_bloodsword", name="花晓之剑", short="剑", tier=SILVER, scope="plant",
          apply="output", impl=True,
          desc="对僵尸造成伤害时，回复自身已损失生命值。"),
@@ -796,6 +796,12 @@ class Engine:
     P_BIGPEA_SLOW = 0.75        # 大腕：攻速 -75% → 射击间隔 ×1/(1-0.75) = ×4
     P_BIGPEA_DMG = 1.00         # 大腕：伤害 +100%（= ×2）
     P_BIGPEA_KNOCK = 80         # 大腕：命中击退距离（一格 = 80px，往右推）
+    # 大腕的「那一格」用的是草坪真实网格：第 0 格左沿 40px，每格宽 80px。
+    # 设计原文是「把命中的那一格的僵尸击退一格」，不是只推挨打的那一只。
+    LAWN_XMIN = 40              # 草坪左边界（像素）
+    LAWN_CELL_W = 80            # 每格宽（像素）
+    LAWN_COLS = 9               # 列数
+    LAWN_ROW_H = 100            # 每行高（像素）
     P_BLOODSWORD_RATIO = 0.30   # 花晓之剑：按造成伤害的 30% 回复已损失生命
     P_TITANRESOLVE_PER_HIT = 0.05   # 泰坦的坚决：每次受伤 +5% 免伤
     P_TITANRESOLVE_CAP = 0.75       # 泰坦的坚决：免伤上限 75%
@@ -1167,6 +1173,43 @@ class Engine:
         self.g.write_i32(z["addr"] + O_X, ni)
         z["x"] = ni
         return new
+
+    # ------------------------------------------------ 草坪网格
+    def _cell_of(self, x):
+        """像素 x → 列号（0..8）。越界夹回边界列，不返回 None。"""
+        c = int(math.floor((x - self.LAWN_XMIN) / float(self.LAWN_CELL_W)))
+        return max(0, min(self.LAWN_COLS - 1, c))
+
+    def _cell_bounds(self, x):
+        """像素 x 所在格的左右沿：(col, x0, x1)。右沿不含。"""
+        c = self._cell_of(x)
+        x0 = self.LAWN_XMIN + c * self.LAWN_CELL_W
+        return c, x0, x0 + self.LAWN_CELL_W
+
+    def _knock_cell(self, z, zombies, px):
+        """把「命中僵尸所在那一格」里的**所有**僵尸一起推开 px 像素。
+
+        设计原文：「可将命中的那一格的僵尸击退一格」——是整格，不是单只。
+        同一格 = 同一行（y 差 < 60，和 _attribute_zombie 同口径）+ 同一列
+        （x 落在同一个 80px 区间）。只推挨打的那一只，会让「一格」这个说法
+        名不副实：一堆僵尸叠在一起时，后面的僵尸照样贴在植物脸上。
+
+        返回被推走的 addr 列表（含命中者自己），方便调用方记事件 / 测试断言。
+        """
+        _, x0, x1 = self._cell_bounds(z["x"])
+        pushed = []
+        for o in zombies:
+            if abs(o["y"] - z["y"]) >= 60:          # 不同行
+                continue
+            if not (x0 <= o["x"] < x1):             # 不在同一列
+                continue
+            self._nudge_x(o, px)
+            ost = o.get("state")
+            if ost is not None:
+                ost.prev_x = None        # 瞬移了一段，别让移速自适应误判
+                ost.chill_prev_x = None
+            pushed.append(o["addr"])
+        return pushed
 
     def _speed_bonus(self, z, st, now):
         """当前移速加成（0.5 = +50%，2.0 = ×3），逃跑计划部分随时间衰减。
@@ -1812,15 +1855,15 @@ class Engine:
         """命中之后的附带效果：电龙魂溅射 / 大腕击退 / 花晓之剑回血。"""
         st = p["state"]
 
-        # --- 大腕：把命中的僵尸往回推一格（+x 是朝右，即远离房子） ---
+        # --- 大腕：把命中僵尸所在那一格里的所有僵尸往回推一格 ---
+        # （+x 是朝右，即远离房子；同格 = 同行 + 同列 80px 区间）
         if st.has("p_bigpea"):
-            self._nudge_x(z, self.P_BIGPEA_KNOCK)
-            zst = z.get("state")
-            if zst is not None:
-                zst.prev_x = None       # 瞬移了一段，别让移速自适应误判
-                zst.chill_prev_x = None
+            pushed = self._knock_cell(z, zombies, self.P_BIGPEA_KNOCK)
             self.events.append(("zombie", z["addr"], "大腕击退",
                                 self.P_BIGPEA_KNOCK))
+            if len(pushed) > 1:
+                self.events.append(("zombie", z["addr"], "大腕击退整格",
+                                    len(pushed)))
 
         # --- 花晓之剑：按造成伤害的比例回复自身已损失生命 ---
         if st.has("p_bloodsword"):
