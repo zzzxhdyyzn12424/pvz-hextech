@@ -694,6 +694,7 @@ class Game:
                 w=struct.unpack_from("<i", raw, off + O_W)[0],
                 h=struct.unpack_from("<i", raw, off + O_H)[0],
             ))
+        return out
 
     # ---------- 植物搬格子（同格叠种 = 融合）----------
     # 为什么能这么干：Board::GetPlantAt(0x40D1A0) 是「线性扫植物数组，
