@@ -4,7 +4,7 @@
 只做一件事：把 HEAD 与远端 main 的差异（HEAD 是远端 main 的单个子提交）
 通过 Git Data API 重放上去，再更新 main 引用 + 打 annotated tag。
 
-用法：python tools/push_via_api.py v1.6.6 "tag message"
+用法：python tools/push_via_api.py v1.6.7 "tag message"
 """
 import base64
 import json

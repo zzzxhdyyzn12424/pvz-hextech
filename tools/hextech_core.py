@@ -1417,7 +1417,11 @@ class Engine:
         v = self.g.f32(z["addr"] + Z_SPEED_FIELD) or 0.0
         ref = st.obs_rate
         if 0.001 < v < self.Z_SPEED_MAX:
-            est = -v * self.Z_SPEED_HZ * self.Z_MOVE_DUTY
+            # +0x34 是「每次 Update 前进多少像素」，乘 100 Hz 就是 px/游戏秒。
+            # 这里**不能**再乘 Z_MOVE_DUTY(0.45)：那个系数只是给 obs_rate 的
+            # 初始猜测用的（几帧内就被低通纠正），拿它算期望位移会少补一半
+            # （普通僵尸 0.23×100=23 px/s，乘 0.45 只剩 10.35）。
+            est = -v * self.Z_SPEED_HZ
             if abs(est) > abs(ref):
                 ref = est
         if abs(ref) < 1e-3:                     # 完全没有参考值，别乱推

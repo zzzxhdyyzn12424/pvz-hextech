@@ -2,9 +2,9 @@
 """一键发 GitHub Release：建 tag 对应的 release + 上传两个 zip。
 
 用法：
-    python tools/gh_release.py --version 1.6.6
-    python tools/gh_release.py --version 1.6.6 --notes docs/release_1.6.6.md
-    python tools/gh_release.py --version 1.6.6 --dry-run
+    python tools/gh_release.py --version 1.6.7
+    python tools/gh_release.py --version 1.6.7 --notes docs/release_1.6.7.md
+    python tools/gh_release.py --version 1.6.7 --dry-run
 
 前置：
     1. tools/make_release.py --version X.Y.Z  已经把 zip 打到
@@ -15,7 +15,7 @@
 
 关于文件名：
     GitHub 的资产上传 API 会把 `name` 参数里的非 ASCII 字符整段剥掉
-    （`PVZ海克斯版_v1.6.6.zip` → `PVZ._v1.6.6.zip`），所以本地中文名
+    （`PVZ海克斯版_v1.6.7.zip` → `PVZ._v1.6.7.zip`），所以本地中文名
     在上传时会映射成 ASCII 资产名。README 里写的是 ASCII 名。
 """
 

@@ -9,7 +9,7 @@
 
 ## 直接玩（不用写代码）
 
-1. 去 [Releases](https://github.com/zzzxhdyyzn12424/pvz-hextech/releases) 下载 `PVZ_Hextech_v1.6.6.zip`
+1. 去 [Releases](https://github.com/zzzxhdyyzn12424/pvz-hextech/releases) 下载 `PVZ_Hextech_v1.6.7.zip`
 2. 解压，**先打开游戏并进入一关**（让场上出现植物和僵尸）
 3. 双击 `PVZ海克斯版.exe`
 
@@ -56,14 +56,14 @@ PVZ海克斯版.exe
 
 | 部分 | 状态 | 位置 |
 |---|---|---|
-| **海克斯版** | ✅ 47 条词条全部实现，173 项测试 | `tools/hextech*.py` |
+| **海克斯版** | ✅ 47 条词条全部实现，176 项测试 | `tools/hextech*.py` |
 | 贴图工具链 | ✅ 可用，AI 出图 → 游戏分部件 PNG | `tools/*_textures.py`、`tools/build_mod.py` |
 | 行为模块（DLL 注入） | ⏸ 已暂停，三条钩子零命中 | `behavior/` |
 
 ### 海克斯版：开发
 
 ```bat
-run.bat tools\test_hextech.py        :: 173 项离线回归，不需要游戏
+run.bat tools\test_hextech.py        :: 176 项离线回归，不需要游戏
 run.bat tools\hextech.py run         :: 启动覆盖层（需要游戏在跑）
 run.bat tools\hextech.py panel       :: 打开词条面板
 run.bat tools\probe_shoot.py test 12 :: 上机验证「真的多射豌豆」
@@ -387,21 +387,21 @@ preview.png
 海克斯版不是 pak 补丁，而是挂在游戏旁边的独立程序，分发方式完全不同：
 
 ```bat
-.venv\Scripts\python.exe tools\make_release.py --version 1.6.6
-.venv\Scripts\python.exe tools\gh_release.py --version 1.6.6
+.venv\Scripts\python.exe tools\make_release.py --version 1.6.7
+.venv\Scripts\python.exe tools\gh_release.py --version 1.6.7
 ```
 
 `make_release.py` 在 `build/release_hextech/` 产出本地中文名 zip；
 `gh_release.py` 负责建 Release 并上传，**上传时会映射成 ASCII 资产名**
 （GitHub 的 API 会把 `name` 参数里的非 ASCII 字符整段剥掉，
-`PVZ海克斯版_v1.6.6.zip` 会变成 `PVZ._v1.6.6.zip`，所以必须换名）。
+`PVZ海克斯版_v1.6.7.zip` 会变成 `PVZ._v1.6.7.zip`，所以必须换名）。
 
 Releases 上的资产：
 
 | 文件 | 大小 | 说明 |
 |---|---|---|
-| `PVZ_Hextech_v1.6.6.zip` | ~29 MB | 单文件 exe，玩家双击即用，不需要 Python |
-| `PVZ_Hextech_v1.6.6_src.zip` | ~70 KB | 纯 Python 脚本，杀软误报时的兜底方案 |
+| `PVZ_Hextech_v1.6.7.zip` | ~29 MB | 单文件 exe，玩家双击即用，不需要 Python |
+| `PVZ_Hextech_v1.6.7_src.zip` | ~70 KB | 纯 Python 脚本，杀软误报时的兜底方案 |
 
 玩家侧流程：
 

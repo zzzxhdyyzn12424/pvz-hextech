@@ -1224,6 +1224,37 @@ def t_unstoppable():
     check("不可阻挡：冰冻下仍走全速", round(frozen / full, 1), 1.0)
     check("对照：普通僵尸被冻到 30%", plain < full * 0.5, True)
 
+    # ---- 黄油（玉米投手）/ 寒冰菇冰冻：都是「游戏完全不推它」----
+    # 这两种控制在内存里表现为同一件事：僵尸被定住、坐标不再变。
+    # 所以用 move=False 的对照组就能等价模拟，不用等真的投手命中。
+    def run_stunned(hexes, frames=15):
+        g, eng = setup(z_x=400, z_hexes=hexes)
+        step(g, eng, 30, move=True)          # 先正常走，建立基准速率
+        if hexes:
+            damage_zombie(g, 10)
+            step(g, eng, 1)                  # 开窗口
+        x0 = g.f32(Z_ADDR + C.O_FX)
+        step(g, eng, frames)                 # 被黄油/冻住：游戏一帧都不推
+        return x0 - g.f32(Z_ADDR + C.O_FX)
+
+    check("黄油/冰冻：免疫的照走", run_stunned(("z_unstoppable",)) > 5.0, True)
+    check("黄油/冰冻：没免疫的纹丝不动", run_stunned(()), 0.0)
+
+    # 免疫期间不能凭空加速：正常走的时候「期望位移 = 实际位移」，不补
+    def run_walk(hexes):
+        g, eng = setup(z_x=400, z_hexes=hexes)
+        step(g, eng, 30, move=True)
+        if hexes:
+            damage_zombie(g, 10)
+            step(g, eng, 1)
+        x0 = g.f32(Z_ADDR + C.O_FX)
+        step(g, eng, 30, move=True)
+        return x0 - g.f32(Z_ADDR + C.O_FX)
+
+    a = run_walk(("z_unstoppable",))
+    b = run_walk(())
+    check("不可阻挡：正常走时不额外加速", abs(a - b) < 0.5, True)
+
     # ---- 啃植物 / 被植物挡住时不能把它推走 ----
     g, eng = setup(z_x=60, plant_hp=5000, z_hexes=("z_unstoppable",))
     damage_zombie(g, 10)
