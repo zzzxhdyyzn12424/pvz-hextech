@@ -38,20 +38,24 @@ set PATH=%TCBIN%;%PATH%
 set CXX=%TCBIN%\i686-w64-mingw32-g++.exe
 set CFLAGS=-m32 -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -fno-use-linker-plugin -static-libgcc -static-libstdc++ -D_CRT_SECURE_NO_WARNINGS
 
-echo [1/3] generating export forwarders ...
+echo [1/4] generating export forwarders ...
 "%PY%" "%ROOT%gen_proxy.py"
 if errorlevel 1 exit /b 1
 
-echo [2/3] copying real wsock32.dll ...
+echo [2/4] generating hex table from tools\hextech_core.py ...
+"%PY%" "%ROOT%gen_hex_table.py"
+if errorlevel 1 exit /b 1
+
+echo [3/4] copying real wsock32.dll ...
 copy /Y "C:\Windows\SysWOW64\wsock32.dll" "%OUT%\wsock32_orig.dll" >nul
 if errorlevel 1 (
   echo [!] copy failed
   exit /b 1
 )
 
-echo [3/3] compiling wsock32.dll ...
-"%CXX%" %CFLAGS% -I"%SRC%" -shared ^
-  "%SRC%\proxy.cpp" "%GEN%\proxy.def" ^
+echo [4/4] compiling wsock32.dll ...
+"%CXX%" %CFLAGS% -I"%SRC%" -I"%GEN%" -shared ^
+  "%SRC%\proxy.cpp" "%SRC%\engine.cpp" "%GEN%\proxy.def" ^
   -o "%OUT%\wsock32.dll" ^
   -static -luser32
 if errorlevel 1 (
