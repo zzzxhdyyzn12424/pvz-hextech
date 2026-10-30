@@ -20,24 +20,25 @@ namespace hx {
 
 namespace {
 
-// 从数组里逐个读出一个对象；返回 false 表示这个槽是空的 / 已经死了
+// 从数组里逐个读出一个对象。调用方已用 SpanSlots 确认整段可读，
+// 所以这里用 RdFast，不再逐个字段做 VirtualQuery。
 bool ReadObj(uintptr_t base, int i, uint32_t stride, uintptr_t app,
              uintptr_t board, uint32_t dead_off, uint32_t hp_off, Obj& out) {
     uintptr_t o = base + (uintptr_t)i * stride;
-    if (Rd<uint32_t>(o) != (uint32_t)app) return false;
-    if (Rd<uint32_t>(o + 4) != (uint32_t)board) return false;
-    if (Rd<uint8_t>(o + dead_off)) return false;
-    int hp = Rd<int>(o + hp_off);
+    if (RdFast<uint32_t>(o) != (uint32_t)app) return false;        // GameObject 指纹
+    if (RdFast<uint32_t>(o + 4) != (uint32_t)board) return false;
+    if (RdFast<uint8_t>(o + dead_off)) return false;
+    int hp = RdFast<int>(o + hp_off);
     if (hp <= 0) return false;
     out.addr = o;
     out.idx = i;
     out.hp = hp;
-    out.hp_max = Rd<int>(o + hp_off + 4);
-    out.type = Rd<int>(o + 0x24);
-    out.row = Rd<int>(o + 0x1C);
-    out.col = Rd<int>(o + 0x28);
-    out.x = Rd<int>(o + 0x08);
-    out.y = Rd<int>(o + 0x0C);
+    out.hp_max = RdFast<int>(o + hp_off + 4);
+    out.type = RdFast<int>(o + 0x24);
+    out.row = RdFast<int>(o + 0x1C);
+    out.col = RdFast<int>(o + 0x28);
+    out.x = RdFast<int>(o + 0x08);
+    out.y = RdFast<int>(o + 0x0C);
     return true;
 }
 
@@ -70,6 +71,7 @@ void Engine::Scan() {
     int pcap = Rd<int>(board + B_PLANT_MAX);
     if (pbase && pcap > 0) {
         if (pcap > MAX_PLANTS) pcap = MAX_PLANTS;
+        pcap = SpanSlots(pbase, PLANT_STRIDE, pcap);
         for (int i = 0; i < pcap; ++i) {
             Obj o;
             if (ReadObj(pbase, i, PLANT_STRIDE, app, board, P_DEAD, P_HP, o))
@@ -81,6 +83,7 @@ void Engine::Scan() {
     int zcap = Rd<int>(board + B_ZOMBIE_MAX);
     if (zbase && zcap > 0) {
         if (zcap > MAX_ZOMBIES) zcap = MAX_ZOMBIES;
+        zcap = SpanSlots(zbase, ZOMBIE_STRIDE, zcap);
         for (int i = 0; i < zcap; ++i) {
             Obj o;
             if (ReadObj(zbase, i, ZOMBIE_STRIDE, app, board, Z_DEAD, Z_HP, o))
@@ -173,6 +176,21 @@ void Engine::Tick() {
 Engine& GetEngine() {
     static Engine e;
     return e;
+}
+
+// ---------------------------------------------------------------------------
+// 游戏每帧回调（detour.S 调进来）
+//
+// 这个函数跑在**游戏主线程**里，每帧一次。要求：
+//   · 不能慢 —— 只有字段读写和少量分支
+//   · 不能抛异常、不能长时间持锁
+//   · 必须防重入（万一游戏在 Update 里又触发了什么）
+// ---------------------------------------------------------------------------
+extern "C" void hx_OnFrame() {
+    static volatile long busy = 0;
+    if (InterlockedExchange(&busy, 1)) return;
+    hx::GetEngine().Tick();
+    InterlockedExchange(&busy, 0);
 }
 
 }  // namespace hx

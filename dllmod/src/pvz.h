@@ -108,6 +108,29 @@ inline uintptr_t Ptr(uintptr_t base, uint32_t off) {
     return Plausible(v) ? v : 0;
 }
 
+
+// 不做 VirtualQuery 的快速读：只用于**已经确认落在同一块已提交内存里**的地址。
+// 对象数组是游戏一次性分配的连续内存，槽位永远不会被释放/搬迁，
+// 所以只要校验过一次数组基址，槽内字段就可以直接解引用。
+// （每帧 100 次 × 几十个字段，全走 VirtualQuery 的话每秒上万次系统调用，太慢。）
+template <typename T>
+inline T RdFast(uintptr_t p) {
+    return *reinterpret_cast<T*>(p);
+}
+
+// 一个数组最多能安全读多少个槽（受所在内存区域大小限制）
+inline int SpanSlots(uintptr_t base, uint32_t stride, int want) {
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery((LPCVOID)base, &mbi, sizeof(mbi)) != sizeof(mbi)) return 0;
+    if (mbi.State != MEM_COMMIT) return 0;
+    if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return 0;
+    uintptr_t end = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+    if (end <= base) return 0;
+    size_t bytes = (size_t)(end - base);
+    int n = (int)(bytes / stride);
+    return n < want ? n : want;
+}
+
 // ---- 场景快照 ----
 struct Snapshot {
     uintptr_t app = 0;
