@@ -471,6 +471,35 @@ class Overlay:
                           fill="#DCE4EC", font=self.FONT_PANEL)
         return len(lines)
 
+    # ---------- 盲盒卡 ----------
+    def _draw_blindbox(self, c):
+        """在盲盒卡上盖一个「?」。卡面是游戏画的，我们只贴个角标。"""
+        box = getattr(self.eng, "blindbox", None)
+        if not box:
+            return 0
+        x = box["x"] + OVERLAY_DX
+        y = box["y"] + OVERLAY_DY
+        if x < -40 or x > 900 or y < -40 or y > 640:
+            return 0
+        s = 17
+        c.create_rectangle(x, y, x + s, y + s,
+                           fill="#B06CF0", outline="#0B0E12", width=1)
+        c.create_text(x + s / 2.0, y + s / 2.0, text="?",
+                      fill="#0B0E12", font=self.FONT_SM)
+        # 冷却条：知道它什么时候能用
+        ref = box.get("refresh") or 0
+        if ref > 0:
+            total = self.g.i32(C.GPLANTDEFS + box["type"] * C.PLANTDEF_STRIDE
+                               + C.PLANTDEF_REFRESH) or 0
+            if total > 0:
+                done = max(0.0, min(1.0, 1.0 - float(ref) / total))
+                c.create_rectangle(x, y + s + 1, x + 44, y + s + 4,
+                                   fill="#2A3038", outline="")
+                if done > 0:
+                    c.create_rectangle(x, y + s + 1, x + 44 * done,
+                                       y + s + 4, fill="#B06CF0", outline="")
+        return 1
+
     # ---------- 主循环 ----------
     def _loop(self):
         self._poll_keys()
@@ -496,13 +525,16 @@ class Overlay:
             if self.show_hp:
                 self._draw_hp(self.canvas)
             n = self._draw_cards(self.canvas)
+            b = self._draw_blindbox(self.canvas)
             if self.show_panel:
                 self._draw_panel(self.canvas, w, h)
             else:
                 self.canvas.create_text(
                     12, h - 20, anchor="w",
-                    text="海克斯版  %.0ffps  卡片 %d  F7 血量%s  F8 详情  F9 %s"
-                         % (self.fps, n, "开" if self.show_hp else "关",
+                    text="海克斯版  %.0ffps  卡片 %d  盲盒 %s  F7 血量%s  F8 详情  F9 %s"
+                         % (self.fps, n,
+                            ("第%d格" % (self.eng.blindbox["slot"] + 1)) if b else "关",
+                            "开" if self.show_hp else "关",
                             "结算中" if self.eng.enabled else "已暂停"),
                     fill="#7A8896", font=self.FONT_SM)
         self.root.after(50, self._loop)
@@ -795,6 +827,15 @@ def cmd_panel(g, auto=False, selftest=False):
         txt.delete("1.0", "end")
 
         put("关卡 %s    阳光 %s\n" % (g.level(), g.sun()), "h")
+        if eng.seeds:
+            put("卡槽 %d 张" % len(eng.seeds), "h")
+            if eng.blindbox:
+                b = eng.blindbox
+                put("　盲盒 = 第 %d 格" % (b["slot"] + 1), "warn")
+                put("（卡面固定，种下去随机；本次会种出 %s）\n"
+                    % C.PLANT_NAMES.get(b["type"], "?%d" % b["type"]), "dim")
+            else:
+                put("\n", "h")
         put("每个对象随机 %d~%d 条，不可重复\n\n" % (C.HEX_MIN, C.HEX_MAX), "h")
 
         put("植物 %d 株\n" % len(plants), "h")

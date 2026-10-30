@@ -551,6 +551,7 @@ python tools/probe_shoot.py audit
 |---|---|
 | `tools/probe_speed.py` | 上机 A/B 验证移速倍率（用游戏帧钟归一化，不受帧率抖动影响） |
 | `tools/probe_shoot.py` | 上机验证「真的多射豌豆」：数 `+0x58` 的跳变次数，直接得每秒开火数 |
+| `tools/probe_seed.py` | 种子银行 / 盲盒卡：`dump` 打印卡槽、`defs` 打印植物定义表、`watch` 观测冷却、`blind` 现场试盲盒 |
 | `tools/pvzdis.py` | 反汇编任意地址区间 / 反查 call 来源（逆向用） |
 | `tools/find_move.py` | 全 `.text` 扫描「写某个 `[reg+disp]`」的指令 |
 
@@ -577,6 +578,119 @@ python tools\probe_shoot.py test 12     :: 写入 120 帧，观测 12 秒，自�
 `test` 结束会自动把 `+0x5C` 还原成原值，不改存档、不改 exe。
 
 > PVZ 失焦或最小化会自动暂停，此时 `+0x58` 冻结不动，计数为 0。看到「几乎没开火」先检查前台。
+
+---
+
+## 3.7 盲盒卡（v1.7）
+
+> 「可以增加植物盲盒卡片吗，就像其他的改版那样」—— 用户需求
+> 选择：**新增一张盲盒卡** + 随机范围 **全部 49 种植物**
+
+### 结论先说
+
+**没有真的新增第 11 张卡，而是把某一个已有卡槽变成「盲盒」。**
+
+原因：真·新增卡需要三件事同时成立，缺一不可 ——
+① 种子银行数组扩容（`SeedPacket mSeedPackets[10]` 之后紧跟 `mNumPackets`，
+越界就写坏计数）；② 一张新卡面（要往 `main.pak` 塞 reanim 并改
+`gReanimDefs` 表）；③ 一个能画出「?」的 `ReanimationType`。
+这三步都在 `.data`/资源层，任何一步错都是启动即崩，而这个 mod 的
+架构是「只读写内存、不注入代码」，做不了 ② ③。
+
+**但盲盒的玩法核心保住了**：卡面固定、种下去随机。下面是把这件事做成的关键。
+
+### 内存地基（全部静态反汇编，逐条可复核）
+
+| 地址 | 指令 | 含义 |
+|---|---|---|
+| `0x40B1DA` | `mov ecx, [ebp+0x144]` | **`SeedBank = Board->mSeedBank`** |
+| `0x40B1E0` | `mov [ecx+0x24], eax` | `SeedBank+0x24` = `mNumPackets` |
+| `0x40B1F6` | `lea esi, [ebx+edx+0x28]` | 第一张卡在 `SeedBank+0x28` |
+| `0x40B204` | `add ebx, 0x50` | `sizeof(SeedPacket) = 0x50` |
+| `0x40B20A` | `cmp ebx, 0x320` | `0x320 / 0x50 = 10`，最多 10 张 |
+| `0x489AC0` | `SeedBank::RemoveSeed(idx)` | 同样按 `+0x28 + idx*0x50` 定位，交叉验证 |
+| `0x489ACD` | `lea eax, [eax+esi+0x5c]` | = `packet+0x34` |
+| `0x489AD4` | `cmp dword ptr [eax], -1` | 空槽的 `mPacketType` 是 `-1` |
+| `0x489B57` | `mov [esi+0x34], edi` | `SetPacketType`：**`mPacketType`** |
+| `0x489B5A` | `mov [esi+0x38], edx` | `mImitaterType` |
+| `0x488F7D` | `mov [edi+0x28], eax` | 冷却 = `gPlantDefs[type].mRefreshTime` |
+
+### SeedPacket 结构（`0x50` 字节）
+
+| 偏移 | 字段 | 说明 |
+|---|---|---|
+| `+0x00` | `gLawnApp` | GameObject 指纹（自检用） |
+| `+0x04` | `Board` | GameObject 指纹（自检用） |
+| `+0x08` | `mX` | 卡面左上角 X（屏幕坐标） |
+| `+0x0C` | `mY` | 卡面左上角 Y |
+| `+0x28` | `mRefreshCounter` | 冷却剩余帧数，0 = 冷却完毕 |
+| `+0x34` | **`mPacketType`** | ★ 种什么就看这个 |
+| `+0x38` | `mImitaterType` | 只有变身茄子卡（48）会用 |
+| `+0x48` | `mActive`（byte） | 1 = 可以点 |
+| `+0x49` | `mCooling`（byte） | 1 = 冷却中 |
+| `+0x4C` | `mUses` | 用了几次，只增不减 → 用来检测「刚种下」 |
+
+### 为什么改 `+0x34` 不会连带改卡面
+
+这是整个方案成立的前提，值得单独说清楚：
+
+1. 卡面（reanim）只在 `SeedPacket::SetPacketType`（`0x489B50`）里建一次，
+   关卡开始时 `SeedBank` 初始化循环调用它，之后**再没被调用过**。
+2. 玩家种下植物 → `0x488EC0`（`SeedPacket::Deactivate`）里只做三件事：
+   `mUses++`、`mCooling = 1`、`mRefreshCounter = gPlantDefs[mPacketType].mRefreshTime`。
+   **它没有重建卡面**，只是用 `+0x34` 去查冷却表。
+3. `Board::AddPlant`（`0x40D120`）种什么，读的也是 `+0x34`。
+
+所以 `+0x34` 从关卡开始就与「画什么」脱钩了 —— **画的是开局那张卡，
+种的是我们每帧写进去的随机值**。这就是盲盒。
+
+### 怎么触发随机
+
+`Engine._tick_blindbox()`，三种模式（`Engine.BLINDBOX_MODE`）：
+
+| 模式 | 触发时机 | 手感 |
+|---|---|---|
+| `"charge"`（默认） | 卡槽从「冷却中」变成「可用」的**那一帧**，以及 `mUses` 变化时 | 卡面 / 光标预览稳定，一次充能只随机一次 |
+| `"use"` | `mUses` 每 +1 | 种下后立刻换，下次拿起时已经是新植物 |
+| `"always"` | 只要可用就每帧随机 | 最盲，但光标预览会逐帧闪 |
+
+默认 `BLINDBOX_SLOT = 0`（第 1 格）；设成 `-1` 就是最后一格。
+`BLINDBOX_POOL` 默认 `range(49)`，`BLINDBOX_EXCLUDE` 可以排掉需要水面 /
+需要花盆的植物（例如 `(16, 19, 43)`）。
+
+抽到 **变身茄子（48）** 时会自动补一个随机 `mImitaterType`，
+否则种下去是个没有目标的空壳。
+
+### 安全阀
+
+`Game.scan_seedbank()` 每次都做三项自检，**任何一项不过就返回空列表，
+整段逻辑直接不干活**（宁可不做也不乱写内存）：
+
+1. `mNumPackets` 必须落在 `1..10`
+2. 每张卡的 `+0x00`/`+0x04` 必须等于 `gLawnApp` / `Board`
+   —— 这条最硬，等于用 GameObject 的对象头当指纹
+3. `mPacketType` 必须是 `-1` 或 `0..48`
+
+### 上机验证（`probe_seed.py`）
+
+```bat
+python tools\probe_seed.py dump       :: 打印整个种子银行，核对偏移
+python tools\probe_seed.py defs       :: 打印 gPlantDefs（成本 / 冷却 / 攻速）
+python tools\probe_seed.py watch 15   :: 只读观测 0 号卡 15 秒，看三个标志位的语义
+python tools\probe_seed.py blind 30   :: 每 0.5 秒换一种，你去种，看种出来是不是卡面那种
+```
+
+`blind` 是判定性实验：
+
+- **种出来 ≠ 卡面** → 卡面定死，盲盒成立，方案收工
+- **种出来 = 卡面** → 卡面每帧跟着 `+0x34` 重建，得改成「只在拿起瞬间写」
+
+### 已知取舍
+
+- **占了一个卡槽**：玩家选的第 1 张卡会变成盲盒。想换格子改 `BLINDBOX_SLOT`。
+- **卡面不是「?」**：盖的是覆盖层画的一个紫色 `?` 角标 + 冷却条，不是游戏原生美术。
+- **`mActive` / `mCooling` 的语义是静态推的**，还没上机确认；
+  即使推错也不会失效 —— `"charge"` 模式还有 `mUses` 变化这条兜底。
 
 ---
 

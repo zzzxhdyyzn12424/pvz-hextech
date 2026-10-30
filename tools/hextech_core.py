@@ -116,6 +116,43 @@ ZOMBIE_STRIDE = 0x15C
 MAX_PLANTS = 512
 MAX_ZOMBIES = 1024
 
+# ---- 种子银行 / 卡槽（v1.7 逆向所得，见 docs/hextech_values.md §盲盒卡）----
+# 证据链：
+#   0x40B1DA  mov ecx, [ebp+0x144]        ; SeedBank = Board->mSeedBank
+#   0x40B1E0  mov [ecx+0x24], eax         ; mNumPackets
+#   0x40B1F6  lea esi, [ebx+edx+0x28]     ; 第一张卡在 SeedBank+0x28
+#   0x40B204  add ebx, 0x50               ; 步长 0x50
+#   0x40B20A  cmp ebx, 0x320              ; 0x320/0x50 = 10 张
+#   0x489AC0  SeedBank::RemoveSeed(idx)   ; 同样按 +0x28 + idx*0x50 定位
+#   0x489ACD  lea eax, [eax+esi+0x5c]     ; = packet+0x34
+#   0x489AD4  cmp [eax], -1               ; 空槽的 mPacketType 是 -1
+#   0x489B57  mov [esi+0x34], edi         ; SetPacketType: mPacketType
+#   0x489B5A  mov [esi+0x38], edx         ;                mImitaterType
+#   0x488F7D  mov [edi+0x28], eax         ; 冷却 = gPlantDefs[type].mRefreshTime
+B_SEEDBANK = 0x144          # Board + 0x144 = SeedBank*
+SB_NUM = 0x24               # SeedBank + 0x24 = 本关卡槽数量
+SB_FIRST = 0x28             # SeedBank + 0x28 = 第一张 SeedPacket
+SEED_STRIDE = 0x50          # sizeof(SeedPacket)
+SEED_MAX = 10               # 0x320 / 0x50
+# SeedPacket 也是 GameObject：+0x00 = gLawnApp、+0x04 = Board。
+# 这两项当指纹用 —— 比任何猜测的字段都可靠。
+SEED_GAPP = 0x00
+SEED_BOARD = 0x04
+SEED_REFRESH = 0x28         # 冷却剩余帧数
+SEED_TYPE = 0x34            # mPacketType（种什么就看这个）
+SEED_IMITATER = 0x38        # mImitaterType（只有变身茄子卡用）
+SEED_ACTIVE = 0x48          # byte，1 = 可以点
+SEED_COOLING = 0x49         # byte，1 = 冷却中
+SEED_USES = 0x4C            # int，用了几次（只增不减，用来检测「刚种下」）
+
+# ---- 植物定义表 gPlantDefs（0x488F76  lea edx,[ecx+ecx*8] → *0x24）----
+#   0x488F76  mov eax, [edx*4+0x69f2c4]   ; = gPlantDefs[type].mRefreshTime
+GPLANTDEFS = 0x69F2C0       # 注意：不是 0x69F2C4，那只是「冷却」字段
+PLANTDEF_STRIDE = 0x24
+PLANTDEF_COST = 0x00
+PLANTDEF_REFRESH = 0x04
+PLANTDEF_RATE = 0x0C
+
 # ---- 每个对象带几个海克斯 ----
 # "random"：每个植物 / 僵尸各自随机 1~3 个（当前采用）
 # "wave"  ：按波次 min(wave+1, 3)（Board+0x5568 的语义还没吃准，先不用）
@@ -635,6 +672,55 @@ class Game:
                 w=struct.unpack_from("<i", raw, off + O_W)[0],
                 h=struct.unpack_from("<i", raw, off + O_H)[0],
             ))
+
+    # ---------- 种子银行 ----------
+    def seedbank(self):
+        """返回 SeedBank 基址，读不到就是 None。"""
+        b = self.board
+        if not b:
+            return None
+        return self.u32(b + B_SEEDBANK)
+
+    def scan_seedbank(self):
+        """返回 [dict]，每个元素是一张卡槽。
+
+        字段自检（任何一项对不上就整段作废，宁可不干活也别乱写内存）：
+            mNumPackets 必须落在 1..10
+            每张卡的 +0x00/+0x04 必须等于 gLawnApp / Board（GameObject 指纹）
+            mPacketType 必须是 -1 或 0..48
+        """
+        sb = self.seedbank()
+        b = self.board
+        if not sb or not b:
+            return []
+        n = self.i32(sb + SB_NUM)
+        if n is None or not (1 <= n <= SEED_MAX):
+            return []
+        raw = self.read(sb + SB_FIRST, SEED_MAX * SEED_STRIDE)
+        if not raw:
+            return []
+        gapp = self.gapp
+        out = []
+        for i in range(n):
+            off = i * SEED_STRIDE
+            if struct.unpack_from("<II", raw, off) != (gapp, b):
+                return []          # 指纹不对，结构猜错了
+            ptype, imit = struct.unpack_from("<ii", raw, off + SEED_TYPE)
+            if not (-1 <= ptype <= 48):
+                return []
+            out.append(dict(
+                addr=sb + SB_FIRST + off, kind="seed", slot=i,
+                type=ptype,
+                imitater=imit,
+                refresh=struct.unpack_from("<i", raw,
+                                           off + SEED_REFRESH)[0],
+                active=raw[off + SEED_ACTIVE],
+                cooling=raw[off + SEED_COOLING],
+                uses=struct.unpack_from("<i", raw, off + SEED_USES)[0],
+                x=struct.unpack_from("<i", raw, off + O_X)[0],
+                y=struct.unpack_from("<i", raw, off + O_Y)[0],
+            ))
+        return out
         return out
 
 
@@ -845,6 +931,21 @@ class Engine:
     # 换成别的类型只要改这里，护盾吸收逻辑不用动。
     Z_SHIELD_TYPE = 1
 
+    # ---- 盲盒卡 ----
+    # 把某一个卡槽变成「盲盒」：卡面固定，种下去的是随机植物。
+    # 原理：卡面在关卡开始时由 SeedPacket::SetPacketType 定死（0x489B50），
+    # 之后只有 mPacketType(+0x34) 会被 Board::AddPlant 读走，
+    # 所以改 +0x34 只影响「种什么」，不影响「画什么」。
+    BLINDBOX_ON = True
+    BLINDBOX_SLOT = 0           # 0 起；-1 = 最后一格
+    # "charge"：每次充能完毕随机一次（推荐，卡面/光标预览稳定）
+    # "use"   ：每次种下后立刻随机（更盲，拿起时看到的是下一次的）
+    # "always"：一直随机（最盲，但光标预览会每帧变）
+    BLINDBOX_MODE = "charge"
+    # 随机池：全部 49 种。想排除特定植物就删掉对应 ID。
+    BLINDBOX_POOL = tuple(range(49))
+    BLINDBOX_EXCLUDE = ()       # 例如 (16, 19, 43) 排除需要水面的
+
     def __init__(self, game, seed=None, preset=None):
         self.g = game
         self.rng = random.Random(seed)
@@ -865,6 +966,9 @@ class Engine:
         self._aura = {}             # 本帧向日葵光环：addr -> (伤害倍率, 免伤比例)
         self._lonely = {}           # 本帧孤勇者判定：addr -> bool
         self._baron = False         # 本帧是否有僵尸带「男爵之手」
+        self.seeds = []             # 最近一帧的卡槽快照
+        self._blind = {}            # packet addr -> dict(uses=, ready=, type=, rolls=)
+        self.blindbox = None        # 本帧盲盒卡槽（dict）或 None
 
     # ------------------------------------------------ 抽卡
     def _count_for(self, wave=None):
@@ -930,6 +1034,8 @@ class Engine:
         self.stats["plant"] = len(plants)
         self.stats["zombie"] = len(zombies)
 
+        self._tick_blindbox(now)
+
         if not self.enabled:
             self.objects = plants + zombies
             return
@@ -942,6 +1048,91 @@ class Engine:
         self._tick_zombies(zombies, plants, now, dt)
 
         self.objects = plants + zombies
+
+    # ------------------------------------------------ 盲盒卡
+    def _blindbox_pool(self):
+        pool = [t for t in self.BLINDBOX_POOL if t not in self.BLINDBOX_EXCLUDE]
+        return pool or list(self.BLINDBOX_POOL)
+
+    def _blind_roll(self, box):
+        """给这张卡换一种植物。只写 mPacketType，不动卡面。"""
+        pool = self._blindbox_pool()
+        cur = box["type"]
+        cand = [t for t in pool if t != cur] or pool
+        t = self.rng.choice(cand)
+        if t != cur:
+            self.g.write_i32(box["addr"] + SEED_TYPE, t)
+            box["type"] = t
+            # 抽到变身茄子必须给个模仿目标，否则种下去是个空壳
+            if t == 48:
+                other = [x for x in pool if x != 48]
+                if other:
+                    self.g.write_i32(box["addr"] + SEED_IMITATER,
+                                     self.rng.choice(other))
+        st = self._blind.get(box["addr"])
+        if st is not None:
+            st["rolls"] += 1
+            st["cur"] = t
+        return t
+
+    def _tick_blindbox(self, now):
+        """把指定卡槽变成盲盒：卡面固定，种下去随机。
+
+        为什么改 +0x34 不会连带改卡面：卡面是关卡开始时
+        SeedPacket::SetPacketType(0x489B50) 一次性建好 reanim，
+        之后 Board::AddPlant 只读 mPacketType 决定种什么，
+        收卡冷却（0x488EC0）也不会重建卡面。
+        所以「画什么」和「种什么」从这一刻起就脱钩了 —— 这就是盲盒。
+        """
+        self.seeds = []
+        self.blindbox = None
+        if not self.BLINDBOX_ON:
+            self._blind.clear()
+            return
+        scan = getattr(self.g, "scan_seedbank", None)
+        if scan is None:
+            return
+        seeds = scan()
+        if not seeds:
+            # 不在关卡里 / 结构对不上：清干净，别拿旧地址乱写
+            self._blind.clear()
+            return
+        self.seeds = seeds
+
+        slot = self.BLINDBOX_SLOT
+        if slot < 0:
+            slot += len(seeds)
+        if not (0 <= slot < len(seeds)):
+            return
+        box = seeds[slot]
+        self.blindbox = box
+        addr = box["addr"]
+        ready = (box["active"] == 1 and box["cooling"] == 0)
+
+        st = self._blind.get(addr)
+        if st is None:
+            self._blind[addr] = dict(uses=box["uses"], ready=ready,
+                                     base=box["type"], cur=box["type"], rolls=0)
+            if ready:
+                self._blind_roll(box)
+            self.blindbox = box
+            return
+
+        mode = self.BLINDBOX_MODE
+        used = box["uses"] != st["uses"]
+        if mode == "always":
+            if ready:
+                self._blind_roll(box)
+        elif mode == "use":
+            if used:
+                self._blind_roll(box)
+        else:                       # "charge"
+            if used or (ready and not st["ready"]):
+                self._blind_roll(box)
+
+        st["uses"] = box["uses"]
+        st["ready"] = ready
+        self.blindbox = box
 
     # ------------------------------------------------ 向日葵光环
     def _near(self, a, b, rx=None, ry=None):

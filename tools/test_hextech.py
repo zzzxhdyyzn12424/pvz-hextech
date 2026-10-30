@@ -51,6 +51,8 @@ class MockGame:
         self.level = 1
         self.plants = []
         self.zombies = []
+        self.seedbank_addr = 0
+        self.seed_count = 0
 
     def _get(self, addr):
         return self.mem.get(addr, 0)
@@ -127,6 +129,35 @@ class MockGame:
             z["x"] = self.i32(z["addr"] + C.O_X)
             z["y"] = self.i32(z["addr"] + C.O_Y)
             out.append(dict(z))
+        return out
+
+    def scan_seedbank(self):
+        """和真 Game 一样的自检规则：数量、GameObject 指纹、type 任何一项不对就整段作废。"""
+        if not self.seedbank_addr:
+            return []
+        n = self.i32(self.seedbank_addr + C.SB_NUM)
+        if not (1 <= n <= C.SEED_MAX):
+            return []
+        out = []
+        for i in range(n):
+            addr = self.seedbank_addr + C.SB_FIRST + i * C.SEED_STRIDE
+            if (self.u32(addr + C.SEED_GAPP),
+                    self.u32(addr + C.SEED_BOARD)) != (self.gapp, self.board):
+                return []
+            t = self.i32(addr + C.SEED_TYPE)
+            if not (-1 <= t <= 48):
+                return []
+            out.append(dict(
+                addr=addr, kind="seed", slot=i,
+                type=t,
+                imitater=self.i32(addr + C.SEED_IMITATER),
+                refresh=self.i32(addr + C.SEED_REFRESH),
+                active=self.u8(addr + C.SEED_ACTIVE),
+                cooling=self.u8(addr + C.SEED_COOLING),
+                uses=self.i32(addr + C.SEED_USES),
+                x=self.i32(addr + C.O_X),
+                y=self.i32(addr + C.O_Y),
+            ))
         return out
 
 
@@ -1275,9 +1306,123 @@ def t_unstoppable():
           x0 - g.f32(Z_ADDR + C.O_FX) > 2.0, True)
 
 
+SB_ADDR = 0x500000
+
+
+def add_seed(g, ptype, slot, active=1, cooling=0, uses=0):
+    """在假内存里摆一张卡。"""
+    addr = SB_ADDR + C.SB_FIRST + slot * C.SEED_STRIDE
+    g.seedbank_addr = SB_ADDR
+    g.seed_count = max(g.seed_count, slot + 1)
+    g.write_i32(SB_ADDR + C.SB_NUM, g.seed_count)
+    g.write_i32(addr + C.SEED_GAPP, g.gapp)
+    g.write_i32(addr + C.SEED_BOARD, g.board)
+    g.write_i32(addr + C.SEED_TYPE, ptype)
+    g.write_i32(addr + C.SEED_IMITATER, -1)
+    g.write_i32(addr + C.SEED_REFRESH, 0)
+    g.write_i32(addr + C.SEED_USES, uses)
+    g.write_u8(addr + C.SEED_ACTIVE, active)
+    g.write_u8(addr + C.SEED_COOLING, cooling)
+    return addr
+
+
+def seed_type(g, slot):
+    return g.i32(SB_ADDR + C.SB_FIRST + slot * C.SEED_STRIDE + C.SEED_TYPE)
+
+
+def set_ready(g, slot, ready):
+    addr = SB_ADDR + C.SB_FIRST + slot * C.SEED_STRIDE
+    g.write_u8(addr + C.SEED_ACTIVE, 1 if ready else 0)
+    g.write_u8(addr + C.SEED_COOLING, 0 if ready else 1)
+
+
+def setup_seeds(types=(0, 1, 5), **kw):
+    g = MockGame()
+    for i, t in enumerate(types):
+        add_seed(g, t, i)
+    eng = C.Engine(g, seed=1, preset={})
+    eng.last_tick = 0.0
+    for k, v in kw.items():
+        setattr(eng, k, v)
+    step(g, eng, 2)
+    return g, eng
+
+
+def t_blindbox():
+    """v1.7：盲盒卡 —— 卡面固定、种下去随机。"""
+    print("\n[12] 盲盒卡（v1.7）")
+
+    # ---- 结构扫描 ----
+    g, eng = setup_seeds()
+    check("盲盒：扫到 3 张卡", len(eng.seeds), 3)
+    check("盲盒：默认选 0 号槽", eng.blindbox["slot"], 0)
+    check("盲盒：开局就随机过了", seed_type(g, 0) != 0, True)
+    check("盲盒：写进去的就是新类型",
+          seed_type(g, 0), eng.blindbox["type"])
+    check("盲盒：别的卡没被动", seed_type(g, 1), 1)
+    check("盲盒：类型合法", 0 <= seed_type(g, 0) <= 48, True)
+
+    # ---- 冷却中不许随机 ----
+    t0 = seed_type(g, 0)
+    set_ready(g, 0, False)
+    g.write_i32(SB_ADDR + C.SB_FIRST + C.SEED_REFRESH, 300)
+    step(g, eng, 5)
+    check("盲盒：冷却中不动", seed_type(g, 0), t0)
+
+    # ---- 充能完毕 → 再随机一次 ----
+    set_ready(g, 0, True)
+    step(g, eng, 1)
+    t1 = seed_type(g, 0)
+    check("盲盒：充能完毕重新随机", t1 != t0, True)
+    step(g, eng, 5)
+    check("盲盒：同一次充能里不再变", seed_type(g, 0), t1)
+
+    # ---- 用掉一次也算一次新充能 ----
+    g.write_i32(SB_ADDR + C.SB_FIRST + C.SEED_USES, 1)
+    step(g, eng, 1)
+    check("盲盒：用掉后重新随机", seed_type(g, 0) != t1, True)
+
+    # ---- 卡面不动：原始类型被记下来了 ----
+    check("盲盒：记下原始卡面", eng._blind[SB_ADDR + C.SB_FIRST]["base"], 0)
+
+    # ---- 抽到变身茄子要给模仿目标 ----
+    g, eng = setup_seeds(BLINDBOX_POOL=(0, 48))
+    box = eng.blindbox
+    check("盲盒：抽到变身茄子", box["type"], 48)
+    check("盲盒：自动补上模仿目标",
+          g.i32(box["addr"] + C.SEED_IMITATER) != -1, True)
+
+    # ---- 关掉就不写 ----
+    g, eng = setup_seeds(BLINDBOX_ON=False)
+    check("盲盒：关掉后不随机", seed_type(g, 0), 0)
+    check("盲盒：关掉后没有盲盒对象", eng.blindbox, None)
+
+    # ---- slot = -1 指向最后一格 ----
+    g, eng = setup_seeds(BLINDBOX_SLOT=-1)
+    check("盲盒：-1 指最后一格", eng.blindbox["slot"], 2)
+    check("盲盒：最后一格被随机", seed_type(g, 2) != 5, True)
+    check("盲盒：0 号槽原样", seed_type(g, 0), 0)
+
+    # ---- 结构自检：GameObject 指纹对不上就整段作废 ----
+    g, eng = setup_seeds()
+    g.write_i32(SB_ADDR + C.SB_FIRST + C.SEED_BOARD, 0x123456)
+    step(g, eng, 1)
+    check("盲盒：指纹不对就整段作废", len(eng.seeds), 0)
+    check("盲盒：作废后不报盲盒", eng.blindbox, None)
+
+    # ---- 结构自检：卡槽数量越界 ----
+    g, eng = setup_seeds()
+    g.write_i32(SB_ADDR + C.SB_NUM, 99)
+    step(g, eng, 1)
+    check("盲盒：卡槽数量越界就不干活", len(eng.seeds), 0)
+
+    # ---- 排除池 ----
+    g, eng = setup_seeds(BLINDBOX_EXCLUDE=tuple(range(49))[1:])
+    check("盲盒：排除池只剩豌豆", eng.blindbox["type"], 0)
+
+
 def main():
     t_rules()
-    t_damage_boost()
     t_zombie_defence()
     t_zombie_offence()
     t_plant_defence()
@@ -1288,6 +1433,7 @@ def main():
     t_new_hexes_v16()
     t_shoot_base_recover()
     t_unstoppable()
+    t_blindbox()
 
     print("\n" + "=" * 52)
     if FAILED:

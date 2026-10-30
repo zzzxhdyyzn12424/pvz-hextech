@@ -165,6 +165,16 @@
 | 僵尸 `dead` | `+0xEC` (byte) | pvztoolkit 版本表 |
 | **当前波次** | **`Board+0x5568`** | 见下方「波次三兄弟」 |
 | 阳光 | `Board+0x5560` | 已实测（自动收集补丁） |
+| **种子银行 `SeedBank`** | **`[Board+0x144]`** | `0x40B1DA  mov ecx,[ebp+0x144]`；`0x488ED6` 从 `packet+4` 取 Board 再取它，交叉验证 |
+| 卡槽数量 `mNumPackets` | `SeedBank+0x24` | `0x40B1E0` / `0x489AC0` 两处一致 |
+| 第 i 张卡 | `SeedBank+0x28 + i*0x50` | `0x40B1F6` + `0x40B204 add ebx,0x50`；上限 `0x320/0x50 = 10` |
+| **卡里的植物 ID** | **`SeedPacket+0x34`** | `0x489B57  mov [esi+0x34],edi`（`SetPacketType`），`0x489AD4 cmp [eax],-1` |
+| 卡槽冷却 | `SeedPacket+0x28` | `0x488F7D  mov [edi+0x28],eax` ← `gPlantDefs[type].mRefreshTime` |
+| **植物定义表 `gPlantDefs`** | **`0x69F2C0`，步长 `0x24`** | `0x488F76  mov eax,[edx*4+0x69f2c4]`（`+0x04` 是冷却） |
+
+`gPlantDefs` 字段（`0x24` 字节）：`+0x00` 阳光成本、`+0x04` 冷却帧数、
+`+0x0C` 攻速帧数、`+0x10` 英文名字符串指针。49 条全部核对过成本与冷却，
+与游戏内数值一一对应。
 
 ### 僵尸的「防具」字段（v0.6 新确认，护盾改走原生通道）
 
